@@ -13,7 +13,7 @@ const apiTarget = process.env.OPENJARVIS_VITE_PROXY_TARGET
   || process.env.VITE_API_URL
   || 'http://localhost:8000';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   resolve: {
     alias: {
       '@': path.resolve(import.meta.dirname, './src'),
@@ -22,7 +22,9 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    VitePWA({
+    // The desktop WebView already serves bundled assets. Its browser cache
+    // must not continue serving an older release after the executable updates.
+    mode !== 'tauri' && VitePWA({
       registerType: 'autoUpdate',
       manifest: {
         name: 'OpenJarvis',
@@ -79,4 +81,4 @@ export default defineConfig({
       '/api': apiTarget,
     },
   },
-});
+}));

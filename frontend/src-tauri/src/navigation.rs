@@ -56,6 +56,14 @@ pub fn guard<R: Runtime>() -> plugin::TauriPlugin<R> {
             let _ = open_in_browser(app, url);
             false
         })
+        .on_page_load(|webview, payload| {
+            if webview.label() == "main"
+                && matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && is_app_navigation(payload.url(), None)
+            {
+                let _ = webview.eval(include_str!("desktop-service-worker-migration.js"));
+            }
+        })
         .build()
 }
 
