@@ -205,7 +205,7 @@ export function ConversationVoicePanel(props: Props) {
               ? t('Выбери модель, чтобы начать разговор.', 'Choose a model to start voice chat.')
               : phase === 'speaking' && headphones
               ? t('Начни говорить, чтобы перебить ответ.', 'Start speaking to interrupt.')
-              : active ? t('Пауза завершает реплику.', 'A pause ends your turn.') : null}
+              : null}
           </p>
           {(error || state?.error) && (
             <p role="status" className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>
