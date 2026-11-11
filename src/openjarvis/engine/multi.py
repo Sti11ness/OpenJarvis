@@ -9,6 +9,12 @@ from typing import Any, Dict, List
 from openjarvis.core.types import Message
 from openjarvis.engine._base import InferenceEngine
 from openjarvis.engine._stubs import StreamChunk
+from openjarvis.engine.codex_app_server import (
+    ENGINE_ID as CODEX_ENGINE_ID,
+)
+from openjarvis.engine.codex_app_server import (
+    is_codex_model_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +38,16 @@ class MultiEngine(InferenceEngine):
     def _refresh_map(self) -> None:
         self._model_map.clear()
         self._model_key_map.clear()
+        native_codex = self.engine_by_key(CODEX_ENGINE_ID)
         for key, engine in self._engines:
             try:
                 for model_id in engine.list_models():
+                    if (
+                        native_codex is not None
+                        and key != CODEX_ENGINE_ID
+                        and is_codex_model_id(model_id)
+                    ):
+                        continue
                     self._model_map[model_id] = engine
                     self._model_key_map[model_id] = key
             except Exception as exc:
@@ -42,8 +55,17 @@ class MultiEngine(InferenceEngine):
 
     _CLOUD_PREFIXES = ("gpt-", "o1-", "o3-", "o4-", "claude-", "gemini-", "openrouter/")
 
+    def engine_by_key(self, key: str) -> InferenceEngine | None:
+        return next((engine for name, engine in self._engines if name == key), None)
+
     def _engine_for(self, model: str) -> InferenceEngine:
         """Find the engine that owns a model, refreshing the map once if needed."""
+        if is_codex_model_id(model):
+            native_codex = self.engine_by_key(CODEX_ENGINE_ID)
+            if native_codex is not None:
+                # Compatible servers can advertise the same alias. Native
+                # Codex owns it even if catalog discovery or auth is failing.
+                return native_codex
         engine = self._model_map.get(model)
         if engine is not None:
             return engine
@@ -122,6 +144,8 @@ class MultiEngine(InferenceEngine):
 
     def engine_key_for(self, model: str) -> str | None:
         """Return the registry key of the engine advertising *model*."""
+        if is_codex_model_id(model) and self.engine_by_key(CODEX_ENGINE_ID) is not None:
+            return CODEX_ENGINE_ID
         key = self._model_key_map.get(model)
         if key is not None:
             return key

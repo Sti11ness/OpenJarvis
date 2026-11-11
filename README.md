@@ -8,6 +8,10 @@ Set `speech.tts_backend = "piper"` in the local configuration and provide the ON
 
 On Windows, set `OPENJARVIS_ACCOUNT_BROWSER_PROFILE` to the same dedicated Edge profile used by Playwright MCP. **Источники данных → Открыть отдельный Edge** opens that profile for manual sign-in to webmail and account sites. Close the Edge window before asking the assistant to use the profile. Clicking a source link opens the system browser.
 
+The model picker shows the effective Codex default and the models available to the signed-in account. The default remains `jarvis-codex`. An explicit choice uses `jarvis-codex/<model-id>` and sends that model ID to Codex App Server. These IDs belong to the native Codex engine when it is configured.
+
+The personal MCP profile can add [CursorTouch Windows-MCP](https://github.com/CursorTouch/Windows-MCP) over stdio. The desktop setup uses `App`, `Snapshot`, `Click` and `Type`. A configured `weather_now` tool provides current conditions through [Open-Meteo](https://open-meteo.com/).
+
 This unofficial fork of [OpenJarvis](https://github.com/open-jarvis/OpenJarvis) is based on Desktop 1.0.5 and distributed under the upstream [Apache 2.0 license](LICENSE).
 
 The first-run screen offers two new inference sources.

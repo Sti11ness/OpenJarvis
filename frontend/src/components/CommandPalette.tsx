@@ -3,11 +3,13 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Cpu, X, Download, Loader2, Trash2, Check, Cloud, Key, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { t } from '../lib/locale';
-import { isChatGptCodexModel, matchesModelQuery, modelDisplayName } from '../lib/model-display';
+import { CODEX_DEFAULT_MODEL, isChatGptCodexModel, matchesModelQuery, modelDisplayName } from '../lib/model-display';
+import type { CodexModelCatalog } from '../lib/api';
 import {
   pullModel,
   deleteModel,
   fetchModels,
+  fetchCodexModels,
   preloadModel,
   isTauri,
   getCloudKeyStatus,
@@ -101,6 +103,10 @@ export function CommandPalette() {
   const [cloudKeyStatus, setCloudKeyStatus] = useState<Record<string, boolean>>({});
   const [cloudKeyError, setCloudKeyError] = useState<string | null>(null);
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [codexCatalog, setCodexCatalog] = useState<CodexModelCatalog | null>(null);
+  const [codexLoading, setCodexLoading] = useState(false);
+  const [codexError, setCodexError] = useState(false);
+  const [codexAttempt, setCodexAttempt] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const models = useAppStore((s) => s.models);
@@ -110,6 +116,20 @@ export function CommandPalette() {
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
 
   const installedIds = new Set(models.map((m) => m.id));
+  const hasNativeCodex = models.some((model) =>
+    isChatGptCodexModel(model.id) && model.owned_by === 'codex_app_server',
+  );
+  const codexOptions = hasNativeCodex ? codexCatalog?.models ?? [] : [];
+  const codexById = new Map(codexOptions.map((option) => [option.id, option]));
+  const installedModels = [
+    ...models,
+    ...codexOptions.filter((option) => !installedIds.has(option.id)).map((option) => ({
+      id: option.id,
+      object: 'model',
+      created: 0,
+      owned_by: 'codex_app_server',
+    })),
+  ];
   const desktopKeyStorage = isTauri();
   const catalogueModels = getCatalogueModels();
 
@@ -128,8 +148,11 @@ export function CommandPalette() {
 
   const filtered = tab === 'installed'
     ? (query
-        ? models.filter((m) => matchesModelQuery(m.id, query))
-        : models)
+        ? installedModels.filter((m) =>
+          matchesModelQuery(m.id, query, codexById.get(m.id)?.display_name)
+          || (m.id === CODEX_DEFAULT_MODEL && codexCatalog?.default_model?.toLowerCase().includes(query.toLowerCase())),
+        )
+        : installedModels)
     : tab === 'catalogue'
     ? catalogueModels.filter((m) =>
         !installedIds.has(m.id) &&
@@ -144,6 +167,24 @@ export function CommandPalette() {
   useEffect(() => {
     void refreshCloudKeyStatus();
   }, [refreshCloudKeyStatus]);
+
+  useEffect(() => {
+    if (!hasNativeCodex) return;
+    const controller = new AbortController();
+    setCodexLoading(true);
+    setCodexError(false);
+    fetchCodexModels(controller.signal)
+      .then((catalog) => {
+        if (!controller.signal.aborted) setCodexCatalog(catalog);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCodexError(true);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setCodexLoading(false);
+      });
+    return () => controller.abort();
+  }, [hasNativeCodex, codexAttempt]);
 
   useEffect(() => {
     setSelectedIdx(0);
@@ -262,19 +303,19 @@ export function CommandPalette() {
       setCommandPaletteOpen(false);
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIdx((i) => Math.min(i + 1, filtered.length - 1));
+      setSelectedIdx((i) => Math.max(0, Math.min(i + 1, filtered.length - 1)));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIdx((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter' && tab === 'installed' && filtered.length > 0) {
       e.preventDefault();
-      const model = filtered[selectedIdx] as (typeof models)[number];
+      const model = filtered[Math.min(selectedIdx, filtered.length - 1)] as (typeof models)[number];
       handleSelect(model.id, model.owned_by);
     }
   };
 
   const TAB_LABELS: Record<Tab, string> = {
-    installed: t(`Установленные (${models.length})`, `Installed Models (${models.length})`),
+    installed: t(`Модели (${installedModels.length})`, `Models (${installedModels.length})`),
     catalogue: t('Загрузка', 'Download'),
     cloud: t('Облачные модели', 'Cloud Models'),
   };
@@ -344,6 +385,18 @@ export function CommandPalette() {
         )}
 
         {/* Status messages */}
+        {tab === 'installed' && hasNativeCodex && (codexLoading || codexError) && (
+          <div className="flex items-center gap-2 px-4 py-2 text-xs" role="status" style={{ color: 'var(--color-text-tertiary)' }}>
+            {codexLoading
+              ? <><Loader2 size={12} className="animate-spin" aria-hidden="true" /> {t('Загружаю модели Codex…', 'Loading Codex models...')}</>
+              : <>
+                {t('Список моделей Codex недоступен.', 'The Codex model list is unavailable.')}
+                <button type="button" className="underline cursor-pointer" onClick={() => setCodexAttempt((attempt) => attempt + 1)}>
+                  {t('Повторить', 'Retry')}
+                </button>
+              </>}
+          </div>
+        )}
         {pullError && (
           <div className="px-4 py-2 text-xs" style={{ color: 'var(--color-error)', background: 'rgba(220,38,38,0.05)' }}>
             {pullError}
@@ -375,6 +428,12 @@ export function CommandPalette() {
                 const isSelected = idx === selectedIdx;
                 const isDeleting = deleting === model.id;
                 const isRemote = model.owned_by === 'litellm' || isChatGptCodexModel(model.id);
+                const codexOption = codexById.get(model.id);
+                const codexDetail = model.id === CODEX_DEFAULT_MODEL && hasNativeCodex
+                  ? (codexCatalog?.default_model
+                    ? t(`Автоматически · ${codexCatalog.default_model}`, `Automatic · ${codexCatalog.default_model}`)
+                    : t('Модель по умолчанию', 'Default model'))
+                  : codexOption?.model;
                 return (
                   <div
                     key={model.id}
@@ -394,8 +453,13 @@ export function CommandPalette() {
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate" style={{ color: isActive ? 'var(--color-accent)' : 'var(--color-text)', fontWeight: isActive ? 500 : 400 }}>
-                          {modelDisplayName(model.id)}
+                          {modelDisplayName(model.id, codexOption?.display_name)}
                         </div>
+                        {codexDetail && (
+                          <div className="truncate text-[11px]" title={codexDetail} style={{ color: 'var(--color-text-tertiary)' }}>
+                            {codexDetail}
+                          </div>
+                        )}
                       </div>
                       {isActive && (
                         <span className="text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'var(--color-accent-subtle)', color: 'var(--color-accent)' }}>

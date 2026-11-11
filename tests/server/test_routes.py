@@ -1761,6 +1761,70 @@ class TestModelsEndpoint:
         assert "Hello" in response.text
         stream_local.assert_not_called()
 
+    @pytest.mark.parametrize("model", ["jarvis-codex", "jarvis-codex/example-model"])
+    def test_native_codex_wins_colliding_aliases_on_both_paths(self, model):
+        from openjarvis.engine.multi import MultiEngine
+
+        codex = _make_engine(content="Native Codex", models=["jarvis-codex", model])
+        codex.engine_id = "codex_app_server"
+        codex.is_cloud = True
+        mirrored = _make_engine(
+            content="Wrong endpoint", models=["jarvis-codex", model]
+        )
+        mirrored.engine_id = "vllm"
+
+        async def wrong_stream(*args, **kwargs):
+            yield "Wrong endpoint"
+
+        mirrored.stream = wrong_stream
+        agent = _make_agent(content="Server agent must not choose another model")
+        engine = MultiEngine([("codex_app_server", codex), ("vllm", mirrored)])
+        client = TestClient(
+            create_app(engine, "jarvis-codex", agent=agent, config=_test_config())
+        )
+        by_id = {row["id"]: row for row in client.get("/v1/models").json()["data"]}
+        assert by_id[model]["owned_by"] == "codex_app_server"
+
+        request = {"model": model, "messages": [{"role": "user", "content": "Hello"}]}
+        streamed = client.post("/v1/chat/completions", json={**request, "stream": True})
+        assert streamed.status_code == 200
+        assert "Hello" in streamed.text
+        assert "Wrong endpoint" not in streamed.text
+        assert '"engine": "codex_app_server"' in streamed.text
+        response = client.post("/v1/chat/completions", json=request)
+        assert response.json()["choices"][0]["message"]["content"] == "Native Codex"
+        assert codex.generate.call_args.kwargs["model"] == model
+        mirrored.generate.assert_not_called()
+        agent.run.assert_not_called()
+
+    def test_native_catalog_is_on_demand_and_missing_from_bridge_only(self):
+        from openjarvis.engine.codex_app_server import CodexAppServerEngine
+        from openjarvis.engine.multi import MultiEngine
+
+        alias = "jarvis-codex"
+        codex = CodexAppServerEngine()
+        bridge = _make_engine(models=[alias])
+        catalog = {"default_model": "example-model", "models": []}
+        engine = MultiEngine([("codex_app_server", codex), ("lmstudio", bridge)])
+        with patch.object(codex, "health", return_value=True):
+            with patch.object(codex, "model_catalog", return_value=catalog) as lookup:
+                client = TestClient(create_app(engine, alias, config=_test_config()))
+                assert client.get("/v1/models").status_code == 200
+                lookup.assert_not_called()
+                assert client.get("/v1/codex/models").json() == catalog
+                lookup.assert_called_once()
+
+        bridge_client = TestClient(create_app(bridge, alias, config=_test_config()))
+        assert bridge_client.get("/v1/codex/models").status_code == 404
+        response = bridge_client.post(
+            "/v1/chat/completions",
+            json={
+                "model": alias + "/example-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+        assert response.status_code == 400
+
     def test_configured_litellm_model_is_listed(self):
         """Regression for #713: LiteLLM models must reach the Web UI."""
         model = "groq/llama-3.3-70b-versatile"

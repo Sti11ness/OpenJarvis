@@ -11,6 +11,12 @@ from typing import Any, Dict, List, Tuple
 from openjarvis.core.config import JarvisConfig
 from openjarvis.core.registry import EngineRegistry
 from openjarvis.engine._base import InferenceEngine
+from openjarvis.engine.codex_app_server import (
+    ENGINE_ID as CODEX_ENGINE_ID,
+)
+from openjarvis.engine.codex_app_server import (
+    is_codex_model_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +249,14 @@ def get_engine(
                 return (default_key, engine)
         except Exception as exc:
             logger.debug("Engine %r health check failed: %s", default_key, exc)
+
+    if (
+        default_key == CODEX_ENGINE_ID
+        and model is not None
+        and is_codex_model_id(model)
+    ):
+        logger.warning("Native Codex is unavailable; no substitute was selected")
+        return None
 
     candidates = [
         (key, engine)

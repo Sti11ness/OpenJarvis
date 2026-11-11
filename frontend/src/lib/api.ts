@@ -2,6 +2,7 @@
 import type { ModelInfo, SavingsData, ServerInfo } from '../types';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
 import { serializeToolCallArguments } from './tool-call';
+import { isChatGptCodexModel } from './model-display';
 
 // ---------------------------------------------------------------------------
 // Supabase config
@@ -193,6 +194,24 @@ export async function fetchModels(): Promise<ModelInfo[]> {
   return data.data || [];
 }
 
+export interface CodexModelOption {
+  id: string;
+  model: string;
+  display_name: string;
+  is_default: boolean;
+}
+
+export interface CodexModelCatalog {
+  default_model: string | null;
+  models: CodexModelOption[];
+}
+
+export async function fetchCodexModels(signal?: AbortSignal): Promise<CodexModelCatalog> {
+  const res = await apiFetch('/v1/codex/models', { signal });
+  if (!res.ok) throw new Error(`Codex model discovery failed: ${res.status}`);
+  return res.json();
+}
+
 export async function fetchRecommendedModel(): Promise<{ model: string; reason: string }> {
   const res = await apiFetch(`/v1/recommended-model`);
   if (!res.ok) return { model: '', reason: 'Failed to fetch' };
@@ -245,7 +264,7 @@ const _CLOUD_PREFIXES = ['gpt-', 'o1-', 'o3-', 'o4-', 'claude-', 'gemini-', 'ope
 
 export async function preloadModel(modelName: string, owner?: string): Promise<void> {
   // Cloud models don't need Ollama preloading
-  if (owner === 'litellm' || _CLOUD_PREFIXES.some(p => modelName.startsWith(p))) {
+  if (isChatGptCodexModel(modelName) || owner === 'litellm' || _CLOUD_PREFIXES.some(p => modelName.startsWith(p))) {
     return;
   }
   // Trigger Ollama to load the model into memory (empty prompt, no generation).

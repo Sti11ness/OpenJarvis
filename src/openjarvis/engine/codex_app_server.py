@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import subprocess
 from collections.abc import AsyncIterator, Callable, Sequence
@@ -26,6 +27,9 @@ from openjarvis.engine._stubs import StreamChunk
 
 ENGINE_ID = "codex_app_server"
 MODEL_ID = "jarvis-codex"
+MODEL_PREFIX = f"{MODEL_ID}/"
+_MODEL_SLUG = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}")
+_MODEL_CATALOG_TTL = 60.0
 _START_TIMEOUT = 15.0
 _TURN_TIMEOUT = 150.0
 _UNLOAD_TIMEOUT = 0.5
@@ -61,6 +65,14 @@ _MCP_INSTRUCTIONS = (
     "to identify the requested control before invoking it. Report a result "
     "only after the tool confirms it."
 )
+
+
+def is_codex_model_id(model: str) -> bool:
+    """Identify the aliases reserved for the native Codex engine."""
+    return model == MODEL_ID or (
+        model.startswith(MODEL_PREFIX)
+        and _MODEL_SLUG.fullmatch(model.removeprefix(MODEL_PREFIX)) is not None
+    )
 
 
 def _find_codex() -> str | None:
@@ -311,8 +323,7 @@ class _AppServer:
             if notifications is not None and "method" in event:
                 notifications.append(event)
 
-    def _thread(self, cwd: str, deadline: float) -> str:
-        configured = _configured_mcp_servers()
+    def _require_chatgpt(self, deadline: float) -> None:
         if not self._initialized:
             self._request(
                 "initialize",
@@ -332,24 +343,85 @@ class _AppServer:
             raise EngineConnectionError(
                 "Sign in to Codex with ChatGPT to use this engine."
             )
+
+    def model_catalog(self, deadline: float) -> dict[str, Any]:
+        """Read current model metadata without opening a conversation."""
+        self._require_chatgpt(deadline)
+        effective = self._request("config/read", {"includeLayers": False}, deadline)
+        default_model = (effective.get("config") or {}).get("model")
+        if not isinstance(default_model, str) or not _MODEL_SLUG.fullmatch(
+            default_model
+        ):
+            default_model = None
+        default_from_catalog = None
+        models: dict[str, dict[str, Any]] = {}
+        cursor = None
+        while True:
+            params: dict[str, Any] = {"includeHidden": False}
+            if cursor is not None:
+                params["cursor"] = cursor
+            page = self._request("model/list", params, deadline)
+            for row in page.get("data") or []:
+                if not isinstance(row, dict) or row.get("hidden"):
+                    continue
+                slug = row.get("model") or row.get("id")
+                if not isinstance(slug, str) or not _MODEL_SLUG.fullmatch(slug):
+                    continue
+                label = row.get("displayName")
+                models[slug] = {
+                    "id": f"{MODEL_PREFIX}{slug}",
+                    "model": slug,
+                    "display_name": label if isinstance(label, str) and label else slug,
+                }
+                if row.get("isDefault"):
+                    default_from_catalog = slug
+            next_cursor = page.get("nextCursor")
+            if (
+                not isinstance(next_cursor, str)
+                or not next_cursor
+                or next_cursor == cursor
+            ):
+                break
+            cursor = next_cursor
+        default_model = default_model or default_from_catalog
+        for row in models.values():
+            row["is_default"] = row["model"] == default_model
+        return {"default_model": default_model, "models": list(models.values())}
+
+    def _thread(
+        self, cwd: str, deadline: float, requested_model: str | None = None
+    ) -> str:
+        configured = _configured_mcp_servers()
+        self._require_chatgpt(deadline)
         # An empty top-level map can retain inherited MCP entries after merging.
         # Disable inherited entries in this thread without editing Codex config.
         effective = self._request("config/read", {"includeLayers": False}, deadline)
         inherited = (effective.get("config") or {}).get("mcp_servers") or {}
         servers = _thread_mcp_servers(configured, inherited)
-        started = self._request(
-            "thread/start",
-            {
-                "cwd": cwd,
-                "sandbox": "read-only",
-                "approvalPolicy": "never",
-                "ephemeral": True,
-                "developerInstructions": _INSTRUCTIONS
-                + (_MCP_INSTRUCTIONS if configured else _TEXT_INSTRUCTIONS),
-                "config": {"mcp_servers": servers},
-            },
-            deadline,
+        instructions = _INSTRUCTIONS + (
+            _MCP_INSTRUCTIONS if configured else _TEXT_INSTRUCTIONS
         )
+        if "jarvis_weather" in configured:
+            instructions += (
+                " For simple current weather questions, call weather_now first. "
+                "Use the browser only if that result cannot answer the request."
+            )
+        if "windows_mcp" in configured:
+            instructions += (
+                " For desktop app launch, control activation, and text entry "
+                "explicitly requested by the user, prefer the Windows-MCP tools."
+            )
+        options: dict[str, Any] = {
+            "cwd": cwd,
+            "sandbox": "read-only",
+            "approvalPolicy": "never",
+            "ephemeral": True,
+            "developerInstructions": instructions,
+            "config": {"mcp_servers": servers},
+        }
+        if requested_model is not None:
+            options["model"] = requested_model
+        started = self._request("thread/start", options, deadline)
         return started["thread"]["id"]
 
     def _unload_thread(self, thread_id: str) -> bool:
@@ -377,9 +449,14 @@ class _AppServer:
             return False
 
     def complete(
-        self, cwd: str, prompt: str, on_delta: Callable[[str], None]
+        self,
+        cwd: str,
+        prompt: str,
+        on_delta: Callable[[str], None],
+        *,
+        requested_model: str | None = None,
     ) -> tuple[str, dict[str, int]]:
-        thread_id = self._thread(cwd, monotonic() + _START_TIMEOUT)
+        thread_id = self._thread(cwd, monotonic() + _START_TIMEOUT, requested_model)
         turn_id = None
         early: list[dict[str, Any]] = []
         try:
@@ -521,16 +598,48 @@ class CodexAppServerEngine(InferenceEngine):
     def __init__(self) -> None:
         self._idle: _LocalSession | None = None
         self._idle_lock = Lock()
+        self._catalog: dict[str, Any] | None = None
+        self._catalog_expires = 0.0
+        self._catalog_lock = Lock()
 
     def can_serve(self, model: str) -> bool:
-        return model == MODEL_ID
+        return is_codex_model_id(model)
 
     def health(self) -> bool:
         executable = _find_codex()
         return executable is not None and _signed_in(executable)
 
     def list_models(self) -> list[str]:
-        return [MODEL_ID] if self.health() else []
+        if not self.health():
+            return []
+        # Model listing is on the ordinary request path. Only the explicit
+        # catalog endpoint may call App Server to refresh its metadata.
+        catalog = self._catalog
+        return (
+            [MODEL_ID, *(row["id"] for row in catalog["models"])]
+            if catalog
+            else [MODEL_ID]
+        )
+
+    def model_catalog(self) -> dict[str, Any]:
+        with self._catalog_lock:
+            if self._catalog is not None and monotonic() < self._catalog_expires:
+                return self._catalog
+            executable = _find_codex()
+            if executable is None:
+                raise EngineConnectionError("The Codex CLI was not found.")
+            session = self._take_session(executable, Event())
+            cached = False
+            try:
+                catalog = session.server.model_catalog(monotonic() + _START_TIMEOUT)
+                self._catalog = catalog
+                self._catalog_expires = monotonic() + _MODEL_CATALOG_TTL
+                # Catalog discovery does not open a thread or start MCP tools.
+                cached = self._cache_session(session)
+                return catalog
+            finally:
+                if not cached:
+                    session.close()
 
     def _take_session(self, executable: str, cancel: Event) -> _LocalSession:
         with self._idle_lock:
@@ -585,7 +694,14 @@ class CodexAppServerEngine(InferenceEngine):
         session = self._take_session(executable, cancel)
         cached = False
         try:
-            result = session.server.complete(session.directory.name, prompt, on_delta)
+            result = session.server.complete(
+                session.directory.name,
+                prompt,
+                on_delta,
+                requested_model=None
+                if model == MODEL_ID
+                else model.removeprefix(MODEL_PREFIX),
+            )
             if session.server.reusable and not cancel.is_set():
                 cached = self._cache_session(session)
             return result
@@ -661,4 +777,4 @@ class CodexAppServerEngine(InferenceEngine):
             await asyncio.shield(task)
 
 
-__all__ = ["CodexAppServerEngine"]
+__all__ = ["CodexAppServerEngine", "is_codex_model_id"]

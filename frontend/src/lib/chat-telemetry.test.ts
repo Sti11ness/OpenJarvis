@@ -65,4 +65,25 @@ describe('chat engine telemetry', () => {
     expect(resolveChatEngine({ selectedModel: 'gpt-5' })).toBe('cloud');
     expect(resolveChatEngine({ selectedModel: 'qwen3:8b' })).toBe('ollama');
   });
+
+  it('recognizes known native Codex routes without masking reported routing', () => {
+    expect(resolveChatEngine({
+      serverEngine: 'multi',
+      selectedModel: 'jarvis-codex',
+      selectedOwner: 'codex_app_server',
+    })).toBe('codex_app_server');
+    expect(resolveChatEngine({
+      serverEngine: 'multi',
+      selectedModel: 'jarvis-codex/gpt-6.1-sol',
+    })).toBe('codex_app_server');
+    expect(resolveChatEngine({
+      routedEngine: 'vllm',
+      selectedModel: 'jarvis-codex',
+      selectedOwner: 'codex_app_server',
+    })).toBe('vllm');
+    expect(resolveChatEngine({
+      serverEngine: 'lmstudio',
+      selectedModel: 'jarvis-codex',
+    })).toBe('lmstudio');
+  });
 });

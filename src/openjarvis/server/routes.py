@@ -17,6 +17,16 @@ from fastapi.responses import StreamingResponse
 
 from openjarvis.core.paths import get_config_dir
 from openjarvis.core.types import Message, Role, ToolCall
+from openjarvis.engine._base import EngineConnectionError
+from openjarvis.engine.codex_app_server import (
+    ENGINE_ID as CODEX_ENGINE_ID,
+)
+from openjarvis.engine.codex_app_server import (
+    MODEL_PREFIX,
+    CodexAppServerEngine,
+    is_codex_model_id,
+)
+from openjarvis.engine.multi import MultiEngine
 from openjarvis.server.model_capabilities import is_embed_only_model
 from openjarvis.server.models import (
     ChatCompletionChunk,
@@ -163,8 +173,12 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
     engine = request.app.state.engine
     agent = getattr(request.app.state, "agent", None)
     model = request_body.model
+    native_codex = _uses_native_codex(engine, model)
+    if model.startswith(MODEL_PREFIX) and not native_codex:
+        raise HTTPException(400, "Select an available model from native Codex.")
     use_server_agent = (
-        agent is not None
+        not native_codex
+        and agent is not None
         and not request_body.tools
         and (not request_body.stream or bool(getattr(agent, "_tools", None)))
     )
@@ -431,44 +445,53 @@ def _remember_exchange(
     )
 
 
-def _engine_key_for_model(engine: Any, model: str) -> str | None:
-    """Resolve the engine that advertised *model* through wrapper layers."""
-    from openjarvis.engine.multi import MultiEngine
+def _unwrap_engine(engine: Any) -> Any:
     from openjarvis.security.guardrails import GuardrailsEngine
     from openjarvis.telemetry.instrumented_engine import InstrumentedEngine
 
-    current = engine
-    while current is not None:
-        if isinstance(current, MultiEngine):
-            return current.engine_key_for(model)
-        if isinstance(current, InstrumentedEngine):
-            current = current._inner
-            continue
-        if isinstance(current, GuardrailsEngine):
-            current = current._engine
-            continue
-        engine_id = getattr(current, "engine_id", None)
-        return engine_id if isinstance(engine_id, str) else None
-    return None
+    while isinstance(engine, (InstrumentedEngine, GuardrailsEngine)):
+        engine = (
+            engine._inner if isinstance(engine, InstrumentedEngine) else engine._engine
+        )
+    return engine
+
+
+def _engine_key_for_model(engine: Any, model: str) -> str | None:
+    """Resolve the engine that advertised *model* through wrapper layers."""
+    engine = _unwrap_engine(engine)
+    if isinstance(engine, MultiEngine):
+        return engine.engine_key_for(model)
+    engine_id = getattr(engine, "engine_id", None)
+    return engine_id if isinstance(engine_id, str) else None
+
+
+def _uses_native_codex(engine: Any, model: str) -> bool:
+    return (
+        is_codex_model_id(model)
+        and _engine_key_for_model(engine, model) == CODEX_ENGINE_ID
+    )
 
 
 def _uses_direct_cloud_router(engine: Any, model: str) -> bool:
     """Whether *model* should bypass the configured engine for direct cloud."""
     from openjarvis.server.cloud_router import is_cloud_model
 
-    return is_cloud_model(model) and _engine_key_for_model(engine, model) != "litellm"
+    return is_cloud_model(model) and _engine_key_for_model(engine, model) not in (
+        "litellm",
+        CODEX_ENGINE_ID,
+    )
 
 
 def _uses_configured_remote_engine(
     engine: Any, model: str, configured_model: str | None
 ) -> bool:
     """Honor the configured remote model when its engine advertises the ID."""
+    if _uses_native_codex(engine, model):
+        return True
     if model != configured_model:
         return False
     if model.startswith("openai/"):
         return _engine_key_for_model(engine, model) == "cloud"
-    if model == "jarvis-codex":
-        return _engine_key_for_model(engine, model) == "codex_app_server"
     return False
 
 
@@ -1140,7 +1163,8 @@ async def list_models(request: Request) -> ModelListResponse:
     model_ids = [
         m
         for m in all_ids
-        if not is_cloud_model(m) or _engine_key_for_model(engine, m) == "litellm"
+        if not is_cloud_model(m)
+        or _engine_key_for_model(engine, m) in ("litellm", CODEX_ENGINE_ID)
     ]
     configured_model = getattr(request.app.state, "model", None)
     if (
@@ -1157,19 +1181,27 @@ async def list_models(request: Request) -> ModelListResponse:
     # the UI auto-select nomic-embed-text and fail every generation with 400.
     model_ids = [m for m in model_ids if not is_embed_only_model(m)]
 
-    return ModelListResponse(
-        data=[
-            ModelObject(
-                id=mid,
-                owned_by=(
-                    "litellm"
-                    if _engine_key_for_model(engine, mid) == "litellm"
-                    else "openjarvis"
-                ),
-            )
-            for mid in model_ids
-        ],
-    )
+    rows = []
+    for model_id in model_ids:
+        owner = _engine_key_for_model(engine, model_id)
+        if owner not in ("litellm", CODEX_ENGINE_ID):
+            owner = "openjarvis"
+        rows.append(ModelObject(id=model_id, owned_by=owner))
+    return ModelListResponse(data=rows)
+
+
+@router.get("/v1/codex/models")
+async def codex_models(request: Request) -> dict[str, Any]:
+    """Resolve the configured default and available managed Codex models on demand."""
+    engine = _unwrap_engine(request.app.state.engine)
+    if isinstance(engine, MultiEngine):
+        engine = _unwrap_engine(engine.engine_by_key(CODEX_ENGINE_ID))
+    if not isinstance(engine, CodexAppServerEngine):
+        raise HTTPException(404, "Native Codex App Server is not configured.")
+    try:
+        return await asyncio.to_thread(engine.model_catalog)
+    except EngineConnectionError as exc:
+        raise HTTPException(503, str(exc)) from exc
 
 
 @router.post("/v1/models/pull")

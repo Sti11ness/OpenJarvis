@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchesModelQuery, modelDisplayName } from './model-display';
+import { codexUpstreamModel, isChatGptCodexModel, matchesModelQuery, modelDisplayName } from './model-display';
 
 describe('model presentation', () => {
   it('names the ChatGPT-backed Codex alias without relabeling other models', () => {
@@ -13,5 +13,16 @@ describe('model presentation', () => {
     expect(matchesModelQuery('jarvis-codex', 'jarvis-codex')).toBe(true);
     expect(matchesModelQuery('qwen3.5:4b', 'qwen')).toBe(true);
     expect(matchesModelQuery('qwen3.5:4b', 'codex')).toBe(false);
+  });
+
+  it('presents qualified Codex choices while preserving their exact routing IDs', () => {
+    const id = 'jarvis-codex/gpt-6.1-sol';
+    expect(codexUpstreamModel(id)).toBe('gpt-6.1-sol');
+    expect(isChatGptCodexModel(id)).toBe(true);
+    expect(modelDisplayName(id)).toBe('Codex · gpt-6.1-sol');
+    expect(modelDisplayName(id, 'GPT-6.1-Sol')).toBe('Codex · GPT-6.1-Sol');
+    expect(matchesModelQuery(id, 'gpt-6.1-sol')).toBe(true);
+    expect(isChatGptCodexModel('jarvis-codex/')).toBe(false);
+    expect(isChatGptCodexModel('my-jarvis-codex')).toBe(false);
   });
 });

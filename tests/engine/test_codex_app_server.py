@@ -18,7 +18,7 @@ from openjarvis.engine.codex_app_server import (
 )
 
 
-def _thread_options() -> dict:
+def _thread_options(requested_model: str | None = None) -> dict:
     server = object.__new__(_AppServer)
     server._initialized = False
     results = {
@@ -37,7 +37,7 @@ def _thread_options() -> dict:
     server._request = Mock(side_effect=lambda method, *_args: results[method])
     server._write = Mock()
 
-    assert server._thread(".", 0) == "thread"
+    assert server._thread(".", 0, requested_model) == "thread"
     method, options, _deadline = server._request.call_args.args
     assert method == "thread/start"
     assert options["sandbox"] == "read-only"
@@ -50,11 +50,62 @@ def test_codex_mcp_profile_defaults_to_text(monkeypatch):
 
     options = _thread_options()
 
+    assert "model" not in options
     assert "Do not invoke tools" in options["developerInstructions"]
     assert options["config"]["mcp_servers"] == {
         "playwright": {"enabled": False},
         "other": {"enabled": False},
     }
+
+
+def test_codex_exact_model_is_passed_to_thread_start(monkeypatch):
+    monkeypatch.delenv("OPENJARVIS_CODEX_MCP_CONFIG", raising=False)
+    assert _thread_options("example-model")["model"] == "example-model"
+
+
+def test_codex_catalog_reports_effective_default_and_visible_aliases():
+    server = object.__new__(_AppServer)
+    server._initialized = True
+    server._request = Mock(
+        side_effect=[
+            {"account": {"type": "chatgpt"}},
+            {"config": {"model": "example-fast"}},
+            {
+                "data": [
+                    {"id": "example-auto", "displayName": "Auto", "isDefault": True},
+                    {"id": "example-hidden", "hidden": True},
+                ],
+                "nextCursor": "second",
+            },
+            {
+                "data": [
+                    {"id": "another-id", "model": "example-fast", "displayName": "Fast"}
+                ]
+            },
+        ]
+    )
+
+    assert server.model_catalog(0) == {
+        "default_model": "example-fast",
+        "models": [
+            {
+                "id": "jarvis-codex/example-auto",
+                "model": "example-auto",
+                "display_name": "Auto",
+                "is_default": False,
+            },
+            {
+                "id": "jarvis-codex/example-fast",
+                "model": "example-fast",
+                "display_name": "Fast",
+                "is_default": True,
+            },
+        ],
+    }
+    assert server._request.call_args.args[:2] == (
+        "model/list",
+        {"includeHidden": False, "cursor": "second"},
+    )
 
 
 def test_codex_mcp_profile_preserves_only_explicit_tools_and_approvals(
