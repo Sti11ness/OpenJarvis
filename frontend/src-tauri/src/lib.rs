@@ -7,6 +7,9 @@ use tauri::Manager;
 use tauri_plugin_autostart::MacosLauncher;
 use tokio::sync::Mutex;
 
+mod navigation;
+mod account_browser;
+
 const OLLAMA_PORT: u16 = 11434;
 const JARVIS_PORT: u16 = 8148;
 const CODEX_ENGINE: &str = "codex_app_server";
@@ -3538,6 +3541,7 @@ pub fn run() {
         .manage(status.clone())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(navigation::guard())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
@@ -3622,6 +3626,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            navigation::open_external_link,
+            account_browser::open_account_browser,
             get_setup_status,
             get_api_base,
             get_codex_login_status,

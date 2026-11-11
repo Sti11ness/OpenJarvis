@@ -35,12 +35,13 @@ import {
   type InferenceSource,
   type MemoryStats,
 } from '../lib/api';
-import { t, uiLabels } from '../lib/locale';
+import { setUiLanguage, t, uiLabels, useUiLanguage } from '../lib/locale';
+import { modelDisplayName } from '../lib/model-display';
 
 const CLOUD_KEY_STATUS_CHANGED = 'openjarvis-cloud-key-status-changed';
-const SAVED = t('Сохранено', 'Saved');
-const CHECKING = t('Проверяем…', 'Checking...');
-const NOT_CONFIGURED = t('Требуется настройка', 'Not configured');
+const savedLabel = () => t('Сохранено', 'Saved');
+const checkingLabel = () => t('Проверяем…', 'Checking...');
+const notConfiguredLabel = () => t('Требуется настройка', 'Not configured');
 
 function OllamaModelList() {
   const [models, setModels] = useState<Array<{ name: string; size: number }>>([]);
@@ -166,7 +167,7 @@ function ApiKeyInput({
           {t('Удалить', 'Remove')}
         </button>
       )}
-      {saved && <span className="text-[10px]" style={{ color: 'var(--color-success)' }}>{SAVED}</span>}
+      {saved && <span className="text-[10px]" style={{ color: 'var(--color-success)' }}>{savedLabel()}</span>}
       {error && <span className="text-[10px]" style={{ color: 'var(--color-error)' }}>{error}</span>}
     </div>
   );
@@ -256,9 +257,9 @@ export function MemoryStatusRow({
         ? t('Хранилище памяти не настроено', 'Memory is not configured')
         : t(`Хранилище ${stats?.backend}. ${entryCount}`, `${stats?.backend} backend — ${entryCount}`);
   const label = status.kind === 'loading'
-    ? CHECKING
+    ? checkingLabel()
     : stats?.backend === 'none'
-      ? NOT_CONFIGURED
+      ? notConfiguredLabel()
       : entryCount || t('Недоступно', 'Unavailable');
 
   return (
@@ -283,13 +284,14 @@ export function MemoryStatusRow({
   );
 }
 
-const themeOptions: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { value: 'light', label: t('Светлая', 'Light'), icon: Sun },
-  { value: 'dark', label: t('Тёмная', 'Dark'), icon: Moon },
-  { value: 'system', label: t('Системная', 'System'), icon: Monitor },
+const themeOptions: { value: ThemeMode; labels: [string, string]; icon: typeof Sun }[] = [
+  { value: 'light', labels: ['Светлая', 'Light'], icon: Sun },
+  { value: 'dark', labels: ['Тёмная', 'Dark'], icon: Moon },
+  { value: 'system', labels: ['Системная', 'System'], icon: Monitor },
 ];
 
 export function SettingsPage() {
+  const language = useUiLanguage();
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
   const conversations = useAppStore((s) => s.conversations);
@@ -456,7 +458,7 @@ export function SettingsPage() {
                 background: 'var(--color-accent-subtle)',
                 color: 'var(--color-success)',
               }}>
-                <Check size={12} /> {SAVED}
+                <Check size={12} /> {savedLabel()}
               </span>
             )}
           </div>
@@ -468,6 +470,25 @@ export function SettingsPage() {
         <div className="flex flex-col gap-4">
           {/* Appearance */}
           <Section title={t("Внешний вид", "Appearance")}>
+            <SettingRow label={t('Язык интерфейса', 'Interface language')}>
+              <select
+                aria-label={t('Язык интерфейса', 'Interface language')}
+                value={language}
+                onChange={(e) => {
+                  const selected = e.target.value;
+                  if (selected === 'ru' || selected === 'en') setUiLanguage(selected);
+                }}
+                className="text-sm px-3 py-1.5 rounded-lg outline-none cursor-pointer"
+                style={{
+                  background: 'var(--color-bg-secondary)',
+                  color: 'var(--color-text)',
+                  border: '1px solid var(--color-border)',
+                }}
+              >
+                <option value="ru" lang="ru">Русский</option>
+                <option value="en" lang="en">English</option>
+              </select>
+            </SettingRow>
             <SettingRow label={t("Тема", "Theme")} description={t("Оформление OpenJarvis", "Choose how OpenJarvis looks")}>
               <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
                 {themeOptions.map((opt) => {
@@ -484,7 +505,7 @@ export function SettingsPage() {
                       }}
                     >
                       <opt.icon size={14} />
-                      {opt.label}
+                      {t(...opt.labels)}
                     </button>
                   );
                 })}
@@ -510,14 +531,14 @@ export function SettingsPage() {
 
           {/* Connection */}
           <Section title={t("Подключение", "Connection")}>
-            <SettingRow label={t('Состояние сервера', 'Server status')} description={serverInfo ? `${serverInfo.engine} / ${serverInfo.model}` : t('Нет подключения', 'Not connected')}>
+            <SettingRow label={t('Состояние сервера', 'Server status')} description={serverInfo ? `${serverInfo.engine} / ${modelDisplayName(serverInfo.model)}` : t('Нет подключения', 'Not connected')}>
               <div className="flex items-center gap-2">
                 <span
                   className="w-2 h-2 rounded-full"
                   style={{ background: healthy === true ? 'var(--color-success)' : healthy === false ? 'var(--color-error)' : 'var(--color-text-tertiary)' }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {healthy === true ? t('Подключён', 'Connected') : healthy === false ? t('Отключён', 'Disconnected') : CHECKING}
+                  {healthy === true ? t('Подключён', 'Connected') : healthy === false ? t('Отключён', 'Disconnected') : checkingLabel()}
                 </span>
               </div>
             </SettingRow>
@@ -845,9 +866,9 @@ export function SettingsPage() {
                   }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {ttsBackend === null ? CHECKING
+                  {ttsBackend === null ? checkingLabel()
                     : ttsBackend.available ? `${ttsBackend.backend}${ttsBackend.voice_id ? ` / ${ttsBackend.voice_id}` : ''}`
-                    : NOT_CONFIGURED}
+                    : notConfiguredLabel()}
                 </span>
               </div>
             </SettingRow>
@@ -862,9 +883,9 @@ export function SettingsPage() {
                   }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {speechBackendAvailable === null ? CHECKING
+                  {speechBackendAvailable === null ? checkingLabel()
                     : speechBackendAvailable ? t('Доступно', 'Available')
-                    : NOT_CONFIGURED}
+                    : notConfiguredLabel()}
                 </span>
               </div>
             </SettingRow>

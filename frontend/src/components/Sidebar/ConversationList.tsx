@@ -8,17 +8,20 @@ interface Props {
   searchQuery: string;
 }
 
-const relativeTime = new Intl.RelativeTimeFormat(uiLanguage, { style: 'short' });
+const relativeTime = {
+  ru: new Intl.RelativeTimeFormat('ru', { style: 'short' }),
+  en: new Intl.RelativeTimeFormat('en', { style: 'short' }),
+};
 
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
   if (minutes < 1) return t('Только что', 'Just now');
-  if (minutes < 60) return relativeTime.format(-minutes, 'minute');
+  if (minutes < 60) return relativeTime[uiLanguage].format(-minutes, 'minute');
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return relativeTime.format(-hours, 'hour');
+  if (hours < 24) return relativeTime[uiLanguage].format(-hours, 'hour');
   const days = Math.floor(hours / 24);
-  if (days < 7) return relativeTime.format(-days, 'day');
+  if (days < 7) return relativeTime[uiLanguage].format(-days, 'day');
   return new Date(timestamp).toLocaleDateString(uiLanguage);
 }
 

@@ -3,6 +3,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { Search, Cpu, X, Download, Loader2, Trash2, Check, Cloud, Key, Eye, EyeOff } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { t } from '../lib/locale';
+import { isChatGptCodexModel, matchesModelQuery, modelDisplayName } from '../lib/model-display';
 import {
   pullModel,
   deleteModel,
@@ -14,7 +15,7 @@ import {
 } from '../lib/api';
 
 /** Popular models that users can download from the catalogue. */
-const CATALOGUE_MODELS = [
+const getCatalogueModels = () => [
   { id: 'qwen3.5:0.8b', size: '~1 GB', desc: t('Qwen 3.5 0.8B — быстрая и компактная', 'Qwen 3.5 0.8B — fast, lightweight') },
   { id: 'qwen3.5:2b', size: '~2.7 GB', desc: 'Qwen 3.5 2B' },
   { id: 'qwen3.5:4b', size: '~3.4 GB', desc: t('Qwen 3.5 4B — рекомендуется для начала', 'Qwen 3.5 4B — recommended default') },
@@ -36,7 +37,7 @@ interface CloudProvider {
   models: Array<{ id: string; desc: string }>;
 }
 
-const CLOUD_PROVIDERS: CloudProvider[] = [
+const getCloudProviders = (): CloudProvider[] => [
   {
     name: 'OpenAI',
     envKey: 'OPENAI_API_KEY',
@@ -110,6 +111,7 @@ export function CommandPalette() {
 
   const installedIds = new Set(models.map((m) => m.id));
   const desktopKeyStorage = isTauri();
+  const catalogueModels = getCatalogueModels();
 
   const refreshCloudKeyStatus = useCallback(async () => {
     if (!desktopKeyStorage) {
@@ -126,10 +128,10 @@ export function CommandPalette() {
 
   const filtered = tab === 'installed'
     ? (query
-        ? models.filter((m) => m.id.toLowerCase().includes(query.toLowerCase()))
+        ? models.filter((m) => matchesModelQuery(m.id, query))
         : models)
     : tab === 'catalogue'
-    ? CATALOGUE_MODELS.filter((m) =>
+    ? catalogueModels.filter((m) =>
         !installedIds.has(m.id) &&
         (!query || m.id.toLowerCase().includes(query.toLowerCase()) || m.desc.toLowerCase().includes(query.toLowerCase()))
       )
@@ -372,6 +374,7 @@ export function CommandPalette() {
                 const isActive = model.id === selectedModel;
                 const isSelected = idx === selectedIdx;
                 const isDeleting = deleting === model.id;
+                const isRemote = model.owned_by === 'litellm' || isChatGptCodexModel(model.id);
                 return (
                   <div
                     key={model.id}
@@ -384,14 +387,14 @@ export function CommandPalette() {
                       className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
                       style={{ background: 'none', border: 'none', padding: 0 }}
                     >
-                      {model.owned_by === 'litellm' ? (
+                      {isRemote ? (
                         <Cloud size={16} style={{ color: isActive ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
                       ) : (
                         <Cpu size={16} style={{ color: isActive ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="text-sm truncate" style={{ color: isActive ? 'var(--color-accent)' : 'var(--color-text)', fontWeight: isActive ? 500 : 400 }}>
-                          {model.id}
+                          {modelDisplayName(model.id)}
                         </div>
                       </div>
                       {isActive && (
@@ -400,7 +403,7 @@ export function CommandPalette() {
                         </span>
                       )}
                     </button>
-                    {model.owned_by !== 'litellm' && (
+                    {!isRemote && (
                       <button
                         onClick={() => handleDelete(model.id)}
                         disabled={isDeleting}
@@ -419,7 +422,7 @@ export function CommandPalette() {
             )
           ) : tab === 'catalogue' ? (
             <>
-              {(filtered as typeof CATALOGUE_MODELS).map((model) => {
+              {(filtered as typeof catalogueModels).map((model) => {
                 const isPulling = pulling === model.id;
                 const justInstalled = pullSuccess === model.id;
                 return (
@@ -476,7 +479,7 @@ export function CommandPalette() {
                   : t('Для облачных моделей задайте ключи API в окружении сервера.', 'Configure cloud provider keys in the server environment to use cloud models.')}
               </div>
 
-              {CLOUD_PROVIDERS.map((provider) => {
+              {getCloudProviders().map((provider) => {
                 const key = apiKeys[provider.envKey] || '';
                 const hasSavedKey = !!cloudKeyStatus[provider.envKey];
                 const hasKey = hasSavedKey || !!key.trim();

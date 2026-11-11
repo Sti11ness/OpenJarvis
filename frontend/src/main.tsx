@@ -6,8 +6,9 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import App from './App';
-import { initApiBase } from './lib/api';
+import { initApiBase, isTauri } from './lib/api';
 import { initAnalytics } from './lib/analytics';
+import { installExternalLinks } from './lib/external-links';
 import { uiLanguage } from './lib/locale';
 import './index.css';
 
@@ -28,6 +29,7 @@ function applyTheme() {
 
 applyTheme();
 document.documentElement.lang = uiLanguage;
+if (isTauri()) installExternalLinks();
 
 // Fetch the API base URL from the Tauri backend before rendering.
 // This ensures JARVIS_PORT is defined in one place (the Rust backend).

@@ -10,6 +10,7 @@ import {
   PanelLeftClose,
   PanelLeft,
   Cpu,
+  Cloud,
   Rocket,
   Bot,
   Sun,
@@ -22,11 +23,12 @@ import {
 import { ConversationList } from './ConversationList';
 import { useAppStore } from '../../lib/store';
 import { t, uiLabels } from '../../lib/locale';
+import { isChatGptCodexModel, modelDisplayName } from '../../lib/model-display';
 
-const THEME_LABELS = {
-  light: t('светлая', 'light'),
-  dark: t('тёмная', 'dark'),
-  system: t('системная', 'system'),
+const RUSSIAN_THEME_LABELS = {
+  light: 'светлая',
+  dark: 'тёмная',
+  system: 'системная',
 };
 
 export function Sidebar() {
@@ -42,6 +44,7 @@ export function Sidebar() {
   const setCommandPaletteOpen = useAppStore((s) => s.setCommandPaletteOpen);
   const modelLoading = useAppStore((s) => s.modelLoading);
   const deepResearch = useAppStore((s) => s.deepResearch);
+  const modelId = selectedModel || serverInfo?.model || '';
 
   const settings = useAppStore((s) => s.settings);
   const updateSettings = useAppStore((s) => s.updateSettings);
@@ -120,7 +123,7 @@ export function Sidebar() {
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 title={t(
-                  `Тема — ${THEME_LABELS[settings.theme]}. Переключить на ${THEME_LABELS[nextTheme]}.`,
+                  `Тема — ${RUSSIAN_THEME_LABELS[settings.theme]}. Переключить на ${RUSSIAN_THEME_LABELS[nextTheme]}.`,
                   `Theme: ${settings.theme} (click for ${nextTheme})`,
                 )}
               >
@@ -153,6 +156,8 @@ export function Sidebar() {
           >
             {modelLoading ? (
               <Loader2 size={14} className="animate-spin" style={{ color: 'var(--color-accent)' }} />
+            ) : isChatGptCodexModel(modelId) ? (
+              <Cloud size={14} />
             ) : (
               <Cpu size={14} />
             )}
@@ -163,7 +168,7 @@ export function Sidebar() {
               >
                 {deepResearch
                   ? uiLabels.deepResearch
-                  : selectedModel || serverInfo?.model || t('Выбрать модель', 'Select model')}
+                  : modelDisplayName(modelId) || t('Выбрать модель', 'Select model')}
               </span>
               {modelLoading && (
                 <span className="text-[10px] block text-left" style={{ color: 'var(--color-accent)' }}>

@@ -16,10 +16,11 @@ import {
 } from '../lib/api';
 import type { ChannelBinding, ManagedAgent, MemoryStats, MemorySearchResult } from '../lib/api';
 import { getBase, isTauri } from '../lib/api';
+import { t } from '../lib/locale';
 import {
   Database, MessageSquare, Loader2, Brain, Search, FolderOpen, FileText,
   Mail, Hash, MessageCircle, CalendarDays, Contact, StickyNote, BookText,
-  Package, Upload, Link2, PhoneCall,
+  Package, Upload, Link2, PhoneCall, Globe,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { SOURCE_CATALOG } from '../types/connectors';
@@ -2292,6 +2293,47 @@ function MemorySection() {
 // Main page
 // ---------------------------------------------------------------------------
 
+function AccountBrowser() {
+  const [opening, setOpening] = useState(false);
+  const [error, setError] = useState('');
+  if (!isTauri()) return null;
+  async function open() {
+    setOpening(true);
+    setError('');
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_account_browser');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setOpening(false);
+    }
+  }
+  return (
+    <section className="mb-5 flex flex-wrap items-center gap-4 rounded-xl border border-[var(--color-border)] p-4">
+      <Globe size={19} aria-hidden="true" style={{ color: 'var(--color-accent)' }} />
+      <div className="min-w-56 flex-1">
+        <h2 className="text-sm font-semibold">{t('Браузер для почты и личных кабинетов', 'Browser for mail and account sites')}</h2>
+        <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+          {t(
+            'Войди на нужный сайт в отдельном профиле Edge, закрой окно Edge и дай Джарвису задачу.',
+            'Sign in to the site in the dedicated Edge profile, close the Edge window, and ask Jarvis to use the site.',
+          )}
+        </p>
+        {error && <p role="status" className="mt-2 text-xs" style={{ color: 'var(--color-error)' }}>{error}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => { void open(); }}
+        disabled={opening}
+        className="rounded-lg border border-[var(--color-border)] px-3 py-2 text-xs font-medium disabled:opacity-50"
+      >
+        {t('Открыть отдельный Edge', 'Open dedicated Edge')}
+      </button>
+    </section>
+  );
+}
+
 export function DataSourcesPage() {
   const [agents, setAgents] = useState<ManagedAgent[]>([]);
   const [activeTab, setActiveTab] = useState<'sources' | 'messaging' | 'memory'>('sources');
@@ -2332,9 +2374,9 @@ export function DataSourcesPage() {
   }, [activeTab, firstAgent, creatingAgent, ensureAgent]);
 
   const tabs = [
-    { id: 'sources' as const, label: 'Data Sources', icon: Database },
-    { id: 'messaging' as const, label: 'Messaging Channels', icon: MessageSquare },
-    { id: 'memory' as const, label: 'Memory', icon: Brain },
+    { id: 'sources' as const, label: t('Источники данных', 'Data Sources'), icon: Database },
+    { id: 'messaging' as const, label: t('Каналы связи', 'Messaging Channels'), icon: MessageSquare },
+    { id: 'memory' as const, label: t('Память', 'Memory'), icon: Brain },
   ];
 
   return (
@@ -2342,10 +2384,10 @@ export function DataSourcesPage() {
       <div className="max-w-5xl mx-auto">
       <header className="mb-6">
         <h1 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
-          Data Sources, Channels &amp; Memory
+          {t('Источники данных, каналы и память', 'Data Sources, Channels & Memory')}
         </h1>
         <p className="text-sm mt-2 max-w-2xl" style={{ color: 'var(--color-text-secondary)' }}>
-          Connect personal data so the assistant can search across everything, and set up messaging channels to chat from your phone.
+          {t('Подключи источники для поиска по своим данным и каналы для общения с телефона.', 'Connect data sources to search your data and channels to chat from your phone.')}
         </p>
       </header>
 
@@ -2380,7 +2422,7 @@ export function DataSourcesPage() {
       </div>
 
       <div>
-        {activeTab === 'sources' && <DataSourcesSection />}
+        {activeTab === 'sources' && <><AccountBrowser /><DataSourcesSection /></>}
         {activeTab === 'messaging' && (
           firstAgent ? (
             <MessagingSection agentId={firstAgent.id} />

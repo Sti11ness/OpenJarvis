@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
+import { modelDisplayName } from '../../lib/model-display';
 import type { TokenUsage, MessageTelemetry } from '../../types';
 
 interface Props {
@@ -23,7 +24,7 @@ export function XRayFooter({ usage, telemetry, isResearch = false }: Props) {
     parts.push('Deep Research');
   } else {
     if (telemetry?.engine) parts.push(telemetry.engine);
-    if (telemetry?.model_id) parts.push(telemetry.model_id);
+    if (telemetry?.model_id) parts.push(modelDisplayName(telemetry.model_id));
   }
   if (telemetry?.complexity_tier) parts.push(telemetry.complexity_tier);
   if (telemetry?.total_ms) parts.push(formatMs(telemetry.total_ms));
@@ -42,7 +43,7 @@ export function XRayFooter({ usage, telemetry, isResearch = false }: Props) {
   if (isResearch) {
     rows.push({ label: 'Mode', value: 'Deep Research' });
   } else if (telemetry?.engine) {
-    const modelDetail = telemetry.model_id || '';
+    const modelDetail = modelDisplayName(telemetry.model_id || '');
     rows.push({ label: 'Engine', value: `${telemetry.engine}${modelDetail ? ` (${modelDetail})` : ''}` });
   }
   if (usage) {

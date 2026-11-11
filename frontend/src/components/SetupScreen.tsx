@@ -15,18 +15,18 @@ import { t, uiLabels, uiLanguage } from '../lib/locale';
 import type { ModelInfo } from '../types';
 import { InferenceRecoveryButton, InferenceSourceSetup } from './InferenceSourceSetup';
 
-const STEPS = [
+const getSteps = () => [
   { key: 'ollama_ready', label: t('Среда запуска', 'Inference Engine'), icon: Cpu, detail: t('Запускаем Ollama…', 'Starting Ollama...') },
   { key: 'model_ready', label: t('Модель', 'AI Model'), icon: Database, detail: uiLabels.loadingModel },
   { key: 'server_ready', label: t('Сервер API', 'API Server'), icon: Server, detail: t('Запускаем сервер…', 'Starting server...') },
 ] as const;
 
-const REMOTE_SETUP: Partial<Record<SetupStatus['source'], {
+const getRemoteSetup = (): Partial<Record<SetupStatus['source'], {
   summary: string;
   engine: string;
   model: string;
   modelLabel?: string;
-}>> = {
+}>> => ({
   custom: {
     summary: t('Подключаемся к вашему серверу моделей…', 'Connecting to your AI server...'),
     engine: t('Подключаемся к серверу…', 'Connecting to your server...'),
@@ -43,9 +43,9 @@ const REMOTE_SETUP: Partial<Record<SetupStatus['source'], {
     engine: t('Подключаемся к OpenAI…', 'Connecting to OpenAI...'),
     model: t('Проверяем доступ к модели…', 'Checking model access...'),
   },
-};
+});
 
-type StepKey = (typeof STEPS)[number]['key'];
+type StepKey = ReturnType<typeof getSteps>[number]['key'];
 
 const SETUP_STATUS_RU: Record<string, string> = {
   'Choose where OpenJarvis should run models.': 'Выберите источник моделей.',
@@ -223,14 +223,15 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
         : status && !status.server_ready
           ? 'server_ready'
           : null;
-  const remote = status && REMOTE_SETUP[status.source];
+  const defaultSteps = getSteps();
+  const remote = status && getRemoteSetup()[status.source];
   const steps = remote
     ? [
-        { ...STEPS[0], detail: remote.engine },
-        { ...STEPS[1], label: remote.modelLabel ?? STEPS[1].label, detail: remote.model },
-        STEPS[2],
+        { ...defaultSteps[0], detail: remote.engine },
+        { ...defaultSteps[1], label: remote.modelLabel ?? defaultSteps[1].label, detail: remote.model },
+        defaultSteps[2],
       ]
-    : STEPS;
+    : defaultSteps;
 
   return (
     <div

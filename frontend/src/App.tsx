@@ -17,8 +17,14 @@ import { fetchModels, fetchServerInfo, fetchSavings, submitSavings, isTauri } fr
 import { OptInModal } from './components/OptInModal';
 import { track, hashId } from './lib/analytics';
 import { offerAnalyticsChoice } from './lib/analytics-invitation';
+import { useUiLanguage } from './lib/locale';
 
 export default function App() {
+  const language = useUiLanguage();
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
   const [setupDone, setSetupDone] = useState(!isTauri());
   const handleSetupReady = useCallback(() => {
     setSetupDone(true);
