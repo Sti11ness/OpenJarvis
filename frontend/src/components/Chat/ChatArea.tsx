@@ -8,12 +8,13 @@ import { shouldAutoplayFinishedReply, useTtsStore } from '../../lib/tts';
 import { stripThinkTags } from '../../lib/message-text';
 import { Sparkles, PanelRightOpen, PanelRightClose, Database, MessageSquare, X } from 'lucide-react';
 import { listConnectors } from '../../lib/connectors-api';
+import { t } from '../../lib/locale';
 
 function getGreeting(): string {
   const hour = new Date().getHours();
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 12) return t('Доброе утро', 'Good morning');
+  if (hour < 18) return t('Добрый день', 'Good afternoon');
+  return t('Добрый вечер', 'Good evening');
 }
 
 export function ChatArea() {
@@ -133,14 +134,14 @@ export function ChatArea() {
   const PanelIcon = systemPanelOpen ? PanelRightClose : PanelRightOpen;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col">
       {/* Toggle bar */}
       <div className="flex items-center justify-end px-3 py-1.5 shrink-0">
         <button
           onClick={toggleSystemPanel}
           className="p-1.5 rounded-md transition-colors cursor-pointer"
           style={{ color: 'var(--color-text-tertiary)' }}
-          title={`${systemPanelOpen ? 'Hide' : 'Show'} system panel (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+I)`}
+          title={`${systemPanelOpen ? t('Скрыть системную панель', 'Hide system panel') : t('Показать системную панель', 'Show system panel')} (${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}+I)`}
         >
           <PanelIcon size={16} />
         </button>
@@ -157,14 +158,14 @@ export function ChatArea() {
         >
           <Database size={16} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
           <span style={{ color: 'var(--color-text-secondary)', flex: 1 }}>
-            Connect your data sources (Gmail, iMessage, Slack, etc.) to get personalized answers.
+            {t('Подключи источники данных, чтобы использовать их в ответах.', 'Connect your data sources to use them in replies.')}
           </span>
           <button
             onClick={() => navigate('/data-sources')}
             className="px-3 py-1 rounded text-xs font-medium cursor-pointer"
             style={{ background: 'var(--color-accent)', color: 'var(--color-on-accent)', border: 'none' }}
           >
-            Connect
+            {t('Подключить', 'Connect')}
           </button>
           <button
             onClick={() => setBannerDismissed(true)}
@@ -178,7 +179,7 @@ export function ChatArea() {
       <div
         ref={listRef}
         onScroll={handleScroll}
-        className="flex-1 overflow-y-auto"
+        className="min-h-0 flex-1 overflow-y-auto"
       >
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full px-4">
@@ -192,7 +193,7 @@ export function ChatArea() {
               {getGreeting()}
             </h2>
             <p className="text-sm text-center max-w-sm mb-6" style={{ color: 'var(--color-text-secondary)' }}>
-              Ask anything. Your AI runs locally — private, fast, and always available.
+              {t('Напиши сообщение или включи голосовой режим.', 'Send a message or start voice chat.')}
             </p>
 
             {/* Quick action hints */}
@@ -209,7 +210,7 @@ export function ChatArea() {
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               >
                 <Database size={14} style={{ color: 'var(--color-accent)' }} />
-                Connect Data Sources
+                {t('Подключить источники', 'Connect data sources')}
               </button>
               <button
                 onClick={() => { navigate('/data-sources'); setTimeout(() => window.dispatchEvent(new CustomEvent('switch-tab', { detail: 'messaging' })), 100); }}
@@ -223,7 +224,7 @@ export function ChatArea() {
                 onMouseLeave={(e) => (e.currentTarget.style.borderColor = 'var(--color-border)')}
               >
                 <MessageSquare size={14} style={{ color: 'var(--color-accent)' }} />
-                Set Up Messaging Channels
+                {t('Настроить каналы', 'Set up messaging channels')}
               </button>
             </div>
           </div>

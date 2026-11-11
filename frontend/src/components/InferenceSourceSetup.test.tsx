@@ -36,12 +36,12 @@ describe('first-run inference source navigation', () => {
   it('renders all four sources before startup', () => {
     const html = renderToStaticMarkup(<InferenceSourceChooser onChoose={vi.fn()} />);
 
-    expect(html).toContain('Codex via ChatGPT');
-    expect(html).toContain('OpenAI API key');
-    expect(html).toContain('Local Ollama');
-    expect(html).toContain('OpenAI-compatible server');
-    expect(html).toContain('Nothing is installed, started, or downloaded until you confirm');
-    expect(html).not.toContain('Starting local setup');
+    expect(html).toContain('Codex через ChatGPT');
+    expect(html).toContain('Ключ OpenAI API');
+    expect(html).toContain('Локальная Ollama');
+    expect(html).toContain('OpenAI-совместимый сервер');
+    expect(html).toContain('Настройка начнётся после подтверждения выбора.');
+    expect(html).not.toContain('Настраиваем локальный запуск');
   });
 
   it('opens separate Codex and OpenAI setup steps with a back path', () => {
@@ -56,10 +56,10 @@ describe('first-run inference source navigation', () => {
     const signedOut = renderToStaticMarkup(<CodexAccountSetup status="signed-out" {...callbacks} />);
     const signedIn = renderToStaticMarkup(<CodexAccountSetup status="signed-in" {...callbacks} />);
 
-    expect(signedOut).toContain('Sign in with ChatGPT');
-    expect(signedIn).toContain('signed in with ChatGPT on this computer');
-    expect(signedIn).toContain('>Continue</button>');
-    expect(signedIn).not.toContain('Sign in with ChatGPT');
+    expect(signedOut).toContain('Войти через ChatGPT');
+    expect(signedIn).toContain('Codex уже подключён к ChatGPT на этом компьютере');
+    expect(signedIn).toContain('>Продолжить</button>');
+    expect(signedIn).not.toContain('Войти через ChatGPT');
   });
 
   it('keeps the Codex action disabled while checking the current account', () => {
@@ -67,15 +67,15 @@ describe('first-run inference source navigation', () => {
       <CodexAccountSetup status="checking" onBack={vi.fn()} onSignIn={vi.fn()} onConfirm={vi.fn()} />,
     );
 
-    expect(html).toContain('Checking your Codex sign-in');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Checking sign-in/);
+    expect(html).toContain('Проверяем вход в Codex');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Проверяем вход…/);
   });
 
   it('requires a model and a masked key for OpenAI setup', () => {
     const html = renderToStaticMarkup(<OpenAIKeySetup onBack={vi.fn()} onConfirm={vi.fn()} />);
 
-    expect(html).toMatch(/aria-label="Model ID"[^>]*required/);
-    expect(html).toMatch(/aria-label="OpenAI API key"[^>]*type="password"[^>]*required/);
+    expect(html).toMatch(/aria-label="Идентификатор модели"[^>]*required/);
+    expect(html).toMatch(/aria-label="Ключ OpenAI API"[^>]*type="password"[^>]*required/);
     expect(html).toMatch(/type="submit"[^>]*disabled/);
   });
 
@@ -84,11 +84,11 @@ describe('first-run inference source navigation', () => {
       <OllamaConsent onBack={vi.fn()} onConfirm={vi.fn()} />,
     );
 
-    expect(html).toContain('may download one model');
-    expect(html).toContain('several gigabytes');
-    expect(html).toContain('Going back leaves Ollama stopped');
-    expect(html).toContain('Use Ollama and continue');
-    expect(html).toContain('Back');
+    expect(html).toContain('при необходимости скачает модель');
+    expect(html).toContain('несколько гигабайт');
+    expect(html).toContain('Кнопка «Назад» возвращает к выбору источника');
+    expect(html).toContain('Использовать Ollama');
+    expect(html).toContain('Назад');
   });
 
   it('requires endpoint coordinates and keeps an explicit cancel control', () => {
@@ -96,12 +96,12 @@ describe('first-run inference source navigation', () => {
       <CustomEndpointSetup onCancel={vi.fn()} onConfirm={vi.fn()} />,
     );
 
-    expect(html).toContain('Server URL');
-    expect(html).toContain('Model ID');
-    expect(html).toMatch(/aria-label="Server URL"[^>]*required/);
-    expect(html).toMatch(/aria-label="Model ID"[^>]*required/);
-    expect(html).toContain('Ollama will not start or download models');
-    expect(html).toContain('Cancel');
+    expect(html).toContain('Адрес сервера');
+    expect(html).toContain('Идентификатор модели');
+    expect(html).toMatch(/aria-label="Адрес сервера"[^>]*required/);
+    expect(html).toMatch(/aria-label="Идентификатор модели"[^>]*required/);
+    expect(html).toContain('Подключение к указанному серверу начнётся после отправки формы');
+    expect(html).toContain('Отмена');
   });
 
   it('renders a source-change recovery action with a guarded busy state', () => {
@@ -112,9 +112,9 @@ describe('first-run inference source navigation', () => {
       <InferenceRecoveryButton recovering onChange={vi.fn()} />,
     );
 
-    expect(ready).toContain('Change inference source');
+    expect(ready).toContain('Сменить источник моделей');
     expect(ready).not.toMatch(/ disabled(?:=""|>)/);
-    expect(stopping).toContain('Stopping setup...');
+    expect(stopping).toContain('Останавливаем настройку…');
     expect(stopping).toMatch(/ disabled(?:=""|>)/);
   });
 });

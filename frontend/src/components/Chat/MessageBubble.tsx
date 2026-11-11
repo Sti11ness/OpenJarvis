@@ -1,3 +1,4 @@
+// Modified in the personal Jarvis fork.
 import { useState, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeHighlight from 'rehype-highlight';
@@ -14,6 +15,7 @@ import { XRayFooter } from './XRayFooter';
 import { SpeakMessageButton } from './SpeakMessageButton';
 import type { ChatMessage } from '../../types';
 import { stripThinkTags } from '../../lib/message-text';
+import { t } from '../../lib/locale';
 
 interface Props {
   message: ChatMessage;
@@ -56,7 +58,7 @@ function CodeBlockPre({ children, ...props }: any) {
         className="flex items-center justify-between px-4 py-1.5 text-xs"
         style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text-tertiary)' }}
       >
-        <span className="font-mono">{lang || 'code'}</span>
+        <span className="font-mono">{lang || t('код', 'code')}</span>
         <button
           onClick={handleCopy}
           className="flex items-center gap-1 px-2 py-0.5 rounded transition-colors cursor-pointer"
@@ -65,7 +67,7 @@ function CodeBlockPre({ children, ...props }: any) {
           onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-tertiary)')}
         >
           {copied ? <Check size={12} /> : <Copy size={12} />}
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t('Скопировано', 'Copied') : t('Скопировать', 'Copy')}
         </button>
       </div>
       <pre {...props} style={{ margin: 0, borderRadius: 0 }}>
@@ -89,7 +91,7 @@ function CopyMessageButton({ content }: { content: string }) {
       onClick={handleCopy}
       className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
       style={{ color: 'var(--color-text-tertiary)' }}
-      title="Copy message"
+      title={t('Скопировать сообщение', 'Copy message')}
     >
       {copied ? <Check size={14} /> : <Copy size={14} />}
     </button>

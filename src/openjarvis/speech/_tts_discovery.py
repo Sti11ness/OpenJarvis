@@ -26,6 +26,7 @@ BACKEND_DEFAULT_VOICE = {
     "openai_tts": "onyx",  # deepest OpenAI preset
     "cartesia": "",  # no safe static default; let Cartesia choose
     "elevenlabs": "JBFqnCBsd6RMkjVDRZzb",  # "George", British male
+    "piper": "piper",
 }
 
 
@@ -51,7 +52,10 @@ def get_tts_backend(
 
     seen = attempted if attempted is not None else set()
 
-    for key in dict.fromkeys((preferred, *TTS_BACKEND_ORDER)):
+    # An explicitly local Piper configuration should never send text to a
+    # cloud service when its local package or model is unavailable.
+    candidates = ("piper",) if preferred == "piper" else (preferred, *TTS_BACKEND_ORDER)
+    for key in dict.fromkeys(candidates):
         if not key or key in seen:
             continue
         seen.add(key)

@@ -1,6 +1,8 @@
+// Modified in the personal Jarvis fork.
 import { Volume2, Square } from 'lucide-react';
 import { useTts } from '../../hooks/useTts';
 import { useAppStore } from '../../lib/store';
+import { t } from '../../lib/locale';
 
 interface Props {
   messageId: string;
@@ -32,12 +34,12 @@ export function SpeakMessageButton({ messageId, content }: Props) {
         title={
           messageError ||
           (isMine && state === 'loading'
-            ? 'Synthesizing...'
+            ? t('Готовим озвучку…', 'Synthesizing...')
             : isMine && state === 'speaking'
-              ? 'Stop'
-              : 'Read aloud')
+              ? t('Остановить', 'Stop')
+              : t('Прочитать вслух', 'Read aloud'))
         }
-        aria-label={busy ? 'Stop reading message' : 'Read message aloud'}
+        aria-label={busy ? t('Остановить чтение', 'Stop reading message') : t('Прочитать сообщение вслух', 'Read message aloud')}
       >
         {busy ? <Square size={14} /> : <Volume2 size={14} />}
       </button>

@@ -1,5 +1,6 @@
 // Must stay the first import: fills in crypto.randomUUID before any module uses it.
 import './lib/polyfills';
+// Modified in the personal Jarvis fork.
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
@@ -7,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import App from './App';
 import { initApiBase } from './lib/api';
 import { initAnalytics } from './lib/analytics';
+import { uiLanguage } from './lib/locale';
 import './index.css';
 
 function applyTheme() {
@@ -25,6 +27,7 @@ function applyTheme() {
 }
 
 applyTheme();
+document.documentElement.lang = uiLanguage;
 
 // Fetch the API base URL from the Tauri backend before rendering.
 // This ensures JARVIS_PORT is defined in one place (the Rust backend).

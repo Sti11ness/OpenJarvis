@@ -1,21 +1,29 @@
+// Modified in the personal Jarvis fork.
 import { Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { useAppStore } from '../../lib/store';
+import { t, uiLabels, uiLanguage } from '../../lib/locale';
 
 interface Props {
   searchQuery: string;
 }
 
+const relativeTime = new Intl.RelativeTimeFormat(uiLanguage, { style: 'short' });
+
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 1) return t('Только что', 'Just now');
+  if (minutes < 60) return relativeTime.format(-minutes, 'minute');
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return relativeTime.format(-hours, 'hour');
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
+  if (days < 7) return relativeTime.format(-days, 'day');
+  return new Date(timestamp).toLocaleDateString(uiLanguage);
+}
+
+function displayTitle(title: string): string {
+  return title === 'New chat' ? uiLabels.newChat : title;
 }
 
 export function ConversationList({ searchQuery }: Props) {
@@ -30,14 +38,14 @@ export function ConversationList({ searchQuery }: Props) {
 
   const filtered = searchQuery
     ? conversations.filter((c) =>
-        c.title.toLowerCase().includes(searchQuery.toLowerCase()),
+        displayTitle(c.title).toLocaleLowerCase(uiLanguage).includes(searchQuery.toLocaleLowerCase(uiLanguage)),
       )
     : conversations;
 
   if (filtered.length === 0) {
     return (
       <div className="px-3 py-8 text-center text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-        {searchQuery ? 'No matching chats' : 'No conversations yet'}
+        {searchQuery ? t('Чаты не найдены', 'No matching chats') : t('Здесь появятся ваши чаты', 'No conversations yet')}
       </div>
     );
   }
@@ -75,7 +83,7 @@ export function ConversationList({ searchQuery }: Props) {
                   fontWeight: isActive ? 500 : 400,
                 }}
               >
-                {conv.title}
+                {displayTitle(conv.title)}
               </div>
               <div className="text-[11px] mt-0.5" style={{ color: 'var(--color-text-tertiary)' }}>
                 {formatRelativeTime(conv.updatedAt)}
@@ -95,8 +103,8 @@ export function ConversationList({ searchQuery }: Props) {
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-tertiary)')}
               title={
                 isStreaming
-                  ? 'Stop generating before deleting this conversation'
-                  : 'Delete conversation'
+                  ? t('Остановите ответ, чтобы удалить чат', 'Stop generating before deleting this conversation')
+                  : t('Удалить чат', 'Delete conversation')
               }
             >
               <Trash2 size={14} />

@@ -6,8 +6,10 @@ import asyncio
 import inspect
 import json
 import logging
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from fastapi import (
     APIRouter,
@@ -17,7 +19,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,15 @@ class SpeechSynthesizeRequest(BaseModel):
     text: str
     voice_id: Optional[str] = None
     speed: Optional[float] = None
+
+
+class ConversationVoiceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool | None = None
+    headphones: bool | None = None
+    playing: bool | None = None
+    acknowledge: int | None = Field(default=None, ge=1)
 
 
 class MemoryStoreRequest(BaseModel):
@@ -988,6 +999,73 @@ async def learning_policy(request: Request):
 # ---- Speech routes ----
 
 speech_router = APIRouter(prefix="/v1/speech", tags=["speech"])
+
+
+def _is_loopback(host: str | None) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host or "").is_loopback
+    except ValueError:
+        return False
+
+
+def _require_local_conversation(request: Request) -> None:
+    if request.client is None or not (
+        _is_loopback(request.client.host) and _is_loopback(request.url.hostname)
+    ):
+        raise HTTPException(403, detail="Голосовой режим доступен на этом компьютере.")
+
+    origin = request.headers.get("origin")
+    if origin is None:
+        return
+    if origin in {"tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"}:
+        return
+    try:
+        parsed = urlsplit(origin)
+        if parsed.scheme in {"http", "https"} and _is_loopback(parsed.hostname):
+            return
+    except ValueError:
+        pass
+    raise HTTPException(403, detail="Голосовой режим доступен в локальном интерфейсе.")
+
+
+@speech_router.get("/conversation")
+async def conversation_voice_state(request: Request):
+    """Read hands-free state and keep the microphone active for its local UI."""
+    from openjarvis.speech.conversation import idle_state
+
+    _require_local_conversation(request)
+    conversation = getattr(request.app.state, "conversation_voice", None)
+    return conversation.snapshot() if conversation is not None else idle_state()
+
+
+@speech_router.post("/conversation")
+async def configure_conversation_voice(
+    request: Request, body: ConversationVoiceRequest,
+):
+    """Enable local microphone capture, set playback gating, or consume a turn."""
+    from openjarvis.speech.conversation import ConversationVoice, idle_state
+
+    _require_local_conversation(request)
+    state = request.app.state
+    conversation = getattr(state, "conversation_voice", None)
+    if conversation is None:
+        if body.enabled is not True:
+            return idle_state()
+        backend = getattr(state, "speech_backend", None)
+        if getattr(backend, "backend_id", None) != "faster-whisper":
+            raise HTTPException(
+                status_code=501,
+                detail="Для разговора нужен локальный Faster-Whisper.",
+            )
+        speech_config = getattr(getattr(state, "config", None), "speech", None)
+        conversation = ConversationVoice(
+            backend,
+            language=getattr(speech_config, "language", None) or None,
+        )
+        state.conversation_voice = conversation
+    return await asyncio.to_thread(conversation.configure, **body.model_dump())
 
 
 @speech_router.post("/transcribe")

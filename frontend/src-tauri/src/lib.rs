@@ -8,7 +8,7 @@ use tauri_plugin_autostart::MacosLauncher;
 use tokio::sync::Mutex;
 
 const OLLAMA_PORT: u16 = 11434;
-const JARVIS_PORT: u16 = 8147;
+const JARVIS_PORT: u16 = 8148;
 const CODEX_ENGINE: &str = "codex_app_server";
 const CODEX_MODEL: &str = "jarvis-codex";
 const OPENAI_ENGINE: &str = "cloud";
@@ -207,7 +207,7 @@ fn openjarvis_home() -> std::path::PathBuf {
     std::env::var_os("OPENJARVIS_HOME")
         .filter(|value| !value.is_empty())
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(home_dir()).join(".openjarvis-codex"))
+        .unwrap_or_else(|| std::path::PathBuf::from(home_dir()).join(".openjarvis-personal"))
 }
 
 /// Resolve full path to a binary by checking common locations.
@@ -2286,7 +2286,7 @@ async fn submit_savings(
 // Cloud API key management
 // ---------------------------------------------------------------------------
 
-const SECURE_KEY_SERVICE: &str = "OpenJarvis Codex Cloud Keys";
+const SECURE_KEY_SERVICE: &str = "OpenJarvis Personal Cloud Keys";
 // A first-run custom credential is kept in its own secure-storage slot until
 // the managed backend has passed every readiness gate.  In particular, do not
 // overwrite an existing <ENGINE>_API_KEY while setup can still be cancelled.
@@ -3556,7 +3556,7 @@ pub fn run() {
             let health = MenuItemBuilder::with_id("health", "Health: starting...")
                 .enabled(false)
                 .build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit OpenJarvis Codex").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit OpenJarvis Personal").build(app)?;
 
             let menu = MenuBuilder::new(app)
                 .item(&show)
@@ -3568,7 +3568,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("OpenJarvis Codex")
+                .tooltip("OpenJarvis Personal")
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "show" => {

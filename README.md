@@ -1,5 +1,11 @@
 ## Codex onboarding fork
 
+### Personal branch
+
+The local `jarvis-personal` branch adds Russian labels for onboarding, chat and primary settings. Its **Голосовой режим** uses local Silero and Faster-Whisper to detect utterances and sends their text to the selected model. Select **Наушники** to interrupt playback by speaking. The neural canvas responds to microphone and playback levels.
+
+Set `speech.tts_backend = "piper"` in the local configuration and provide the ONNX path with `OPENJARVIS_PIPER_MODEL` to use Piper. Install the optional `piper-tts` dependency in the server environment. Codex tools can be provided via `OPENJARVIS_CODEX_MCP_CONFIG`, a path to a JSON file with an explicit `mcp_servers` table. The personal application uses its own profile and loopback port 8148.
+
 This unofficial fork of [OpenJarvis](https://github.com/open-jarvis/OpenJarvis) is based on Desktop 1.0.5 and distributed under the upstream [Apache 2.0 license](LICENSE).
 
 The first-run screen offers two new inference sources.
@@ -7,7 +13,7 @@ The first-run screen offers two new inference sources.
 - **Codex via ChatGPT** uses a locally installed Codex CLI. It reuses the current ChatGPT sign-in or opens the official sign-in flow when requested. OpenJarvis communicates with Codex App Server over stdio. This engine returns text and supports streaming.
 - **OpenAI API key** sends requests to the OpenAI API with a user-supplied key and model ID. The desktop app stores the key in the system credential store after setup. OpenAI bills this mode through the API account associated with that key.
 
-The fork also changes the desktop identity, profile and API port so it can run alongside stock OpenJarvis. Its profile defaults to `.openjarvis-codex` and its backend listens on loopback port 8147. The fork retains the upstream local and OpenAI-compatible server options.
+The public onboarding branch has its own desktop identity and profile at `.openjarvis-codex` with a loopback backend on port 8147. The personal branch uses a separate `.openjarvis-personal` profile. Both retain the upstream local and OpenAI-compatible server options.
 
 ### Build the desktop fork
 

@@ -1,3 +1,4 @@
+// Modified in the personal Jarvis fork.
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import {
@@ -20,6 +21,13 @@ import {
 } from 'lucide-react';
 import { ConversationList } from './ConversationList';
 import { useAppStore } from '../../lib/store';
+import { t, uiLabels } from '../../lib/locale';
+
+const THEME_LABELS = {
+  light: t('светлая', 'light'),
+  dark: t('тёмная', 'dark'),
+  system: t('системная', 'system'),
+};
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -53,13 +61,13 @@ export function Sidebar() {
   };
 
   const navItems = [
-    { path: '/', icon: MessageSquare, label: 'Chat' },
-    { path: '/dashboard', icon: BarChart3, label: 'Dashboard' },
-    { path: '/data-sources', icon: Database, label: 'Data Sources' },
-    { path: '/agents', icon: Bot, label: 'Agents' },
-    { path: '/logs', icon: ScrollText, label: 'Logs' },
-    { path: '/settings', icon: Settings, label: 'Settings' },
-    { path: '/get-started', icon: Rocket, label: 'Get Started' },
+    { path: '/', icon: MessageSquare, label: t('Чат', 'Chat') },
+    { path: '/dashboard', icon: BarChart3, label: t('Статистика', 'Dashboard') },
+    { path: '/data-sources', icon: Database, label: t('Источники данных', 'Data Sources') },
+    { path: '/agents', icon: Bot, label: t('Агенты', 'Agents') },
+    { path: '/logs', icon: ScrollText, label: t('Журналы', 'Logs') },
+    { path: '/settings', icon: Settings, label: t('Настройки', 'Settings') },
+    { path: '/get-started', icon: Rocket, label: t('С чего начать', 'Get Started') },
   ];
 
   return (
@@ -68,6 +76,7 @@ export function Sidebar() {
       {!sidebarOpen && (
         <button
           onClick={toggleSidebar}
+          aria-label={t('Показать боковую панель', 'Show sidebar')}
           className="fixed top-3 left-3 z-30 p-2 rounded-lg transition-colors cursor-pointer"
           style={{ color: 'var(--color-text-secondary)', background: 'var(--color-bg-secondary)' }}
           onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
@@ -95,6 +104,7 @@ export function Sidebar() {
           <div className="flex items-center justify-between px-3 pt-3 pb-2">
             <button
               onClick={toggleSidebar}
+              aria-label={t('Свернуть боковую панель', 'Hide sidebar')}
               className="p-2 rounded-lg transition-colors cursor-pointer"
               style={{ color: 'var(--color-text-secondary)' }}
               onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
@@ -109,7 +119,10 @@ export function Sidebar() {
                 style={{ color: 'var(--color-text-secondary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                title={`Theme: ${settings.theme} (click for ${nextTheme})`}
+                title={t(
+                  `Тема — ${THEME_LABELS[settings.theme]}. Переключить на ${THEME_LABELS[nextTheme]}.`,
+                  `Theme: ${settings.theme} (click for ${nextTheme})`,
+                )}
               >
                 <ThemeIcon size={16} />
               </button>
@@ -119,7 +132,7 @@ export function Sidebar() {
                 style={{ color: 'var(--color-text-secondary)' }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
                 onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                title="New chat"
+                title={uiLabels.newChat}
               >
                 <Plus size={18} />
               </button>
@@ -149,12 +162,12 @@ export function Sidebar() {
                 style={{ color: deepResearch ? 'var(--color-accent)' : 'var(--color-text)' }}
               >
                 {deepResearch
-                  ? 'Deep Research'
-                  : selectedModel || serverInfo?.model || 'Select model'}
+                  ? uiLabels.deepResearch
+                  : selectedModel || serverInfo?.model || t('Выбрать модель', 'Select model')}
               </span>
               {modelLoading && (
                 <span className="text-[10px] block text-left" style={{ color: 'var(--color-accent)' }}>
-                  Loading model...
+                  {uiLabels.loadingModel}
                 </span>
               )}
             </div>
@@ -177,7 +190,7 @@ export function Sidebar() {
               <Search size={14} style={{ color: 'var(--color-text-tertiary)' }} />
               <input
                 type="text"
-                placeholder="Search chats..."
+                placeholder={t('Поиск по чатам…', 'Search chats...')}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="flex-1 bg-transparent outline-none text-sm"

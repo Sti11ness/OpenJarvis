@@ -1,5 +1,7 @@
+// Modified in the personal Jarvis fork.
 import { useState } from 'react';
 import type { SpeechState } from '../../hooks/useSpeech';
+import { t } from '../../lib/locale';
 
 interface MicButtonProps {
   state: SpeechState;
@@ -13,16 +15,16 @@ export function MicButton({ state, onClick, disabled, reason }: MicButtonProps) 
 
   const tooltipText =
     reason === 'not-enabled'
-      ? 'Enable in Settings'
+      ? t('Включите в настройках', 'Enable in Settings')
       : reason === 'no-backend'
-        ? 'Speech backend not configured'
+        ? t('Распознавание речи не настроено', 'Speech backend not configured')
         : reason === 'streaming'
-          ? 'Wait for response'
+          ? t('Дождитесь ответа', 'Wait for response')
           : state === 'recording'
-            ? 'Stop recording'
+            ? t('Остановить запись', 'Stop recording')
             : state === 'transcribing'
-              ? 'Transcribing...'
-              : 'Voice input';
+              ? t('Распознаём речь…', 'Transcribing...')
+              : t('Голосовой ввод', 'Voice input');
 
   const isInactive = disabled || state === 'transcribing';
 
@@ -34,6 +36,7 @@ export function MicButton({ state, onClick, disabled, reason }: MicButtonProps) 
     >
       <button
         onClick={onClick}
+        aria-label={tooltipText}
         disabled={isInactive}
         className="p-2 rounded-xl transition-all shrink-0"
         style={{

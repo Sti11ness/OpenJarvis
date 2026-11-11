@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import pathlib
@@ -320,6 +321,10 @@ def create_app(
 
     @app.on_event("shutdown")
     async def _shutdown_managed_runtime() -> None:
+        conversation_voice = getattr(app.state, "conversation_voice", None)
+        if conversation_voice is not None:
+            await asyncio.to_thread(conversation_voice.close)
+
         # Quiesce every producer before touching the shared MCP pool. Route
         # workers are registered under this lock, so none can slip in after
         # the snapshot. The scheduler has a two-phase stop because closing an

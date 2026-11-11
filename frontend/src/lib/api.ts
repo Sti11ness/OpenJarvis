@@ -56,7 +56,7 @@ export async function initApiBase(): Promise<void> {
   }
 }
 
-const DESKTOP_API_FALLBACK = 'http://127.0.0.1:8147';
+const DESKTOP_API_FALLBACK = 'http://127.0.0.1:8148';
 
 const getSettingsApiUrl = (): string => {
   try {
@@ -442,6 +442,41 @@ export async function fetchSpeechHealth(): Promise<SpeechHealth> {
   }
   const res = await apiFetch(`/v1/speech/health`);
   if (!res.ok) return { available: false };
+  return res.json();
+}
+
+export interface ConversationVoiceState {
+  enabled: boolean;
+  phase: 'off' | 'starting' | 'listening' | 'recording' | 'transcribing' | 'error';
+  level: number;
+  utterance: { id: number; text: string } | null;
+  started: number;
+  error: string | null;
+}
+
+export interface ConversationVoiceUpdate {
+  enabled?: boolean;
+  headphones?: boolean;
+  playing?: boolean;
+  acknowledge?: number;
+}
+
+export async function conversationVoice(
+  update?: ConversationVoiceUpdate,
+): Promise<ConversationVoiceState> {
+  const target = new URL(getBase() || window.location.origin);
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(target.hostname)) {
+    throw new Error('Режим разговора доступен через локальный сервер.');
+  }
+  const res = await apiFetch('/v1/speech/conversation', update === undefined ? {} : {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(update),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(typeof body?.detail === 'string' ? body.detail : `Ошибка микрофона (${res.status})`);
+  }
   return res.json();
 }
 

@@ -1,4 +1,6 @@
+// Modified in the personal Jarvis fork.
 import { useState, useEffect, useCallback } from 'react';
+import { t } from '../../lib/locale';
 import {
   Zap,
   Activity,
@@ -91,13 +93,13 @@ export function SystemPanel() {
         style={{ borderBottom: '1px solid var(--color-border)' }}
       >
         <span className="text-xs font-semibold tracking-wide uppercase" style={{ color: 'var(--color-text-secondary)' }}>
-          System
+          {t('Система', 'System')}
         </span>
         <button
           onClick={toggleSystemPanel}
           className="p-1 rounded-md transition-colors cursor-pointer"
           style={{ color: 'var(--color-text-tertiary)' }}
-          title="Close panel"
+          title={t('Закрыть панель', 'Close panel')}
         >
           <X size={14} />
         </button>
@@ -107,39 +109,39 @@ export function SystemPanel() {
         {/* Session Stats */}
         <section>
           <h4 className="text-[11px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-            Session
+            {t('Сеанс', 'Session')}
           </h4>
           <div className="grid grid-cols-2 gap-2">
-            <MiniStat icon={Hash} label="Requests" value={String(savings?.total_calls ?? telemetry?.total_requests ?? 0)} />
-            <MiniStat icon={Hash} label="Output Tokens" value={formatNumber(savings?.total_completion_tokens ?? telemetry?.total_tokens ?? 0)} />
+            <MiniStat icon={Hash} label={t('Запросы', 'Requests')} value={String(savings?.total_calls ?? telemetry?.total_requests ?? 0)} />
+            <MiniStat icon={Hash} label={t('Токены ответа', 'Output Tokens')} value={formatNumber(savings?.total_completion_tokens ?? telemetry?.total_tokens ?? 0)} />
           </div>
         </section>
 
         {/* Device */}
         <section>
           <h4 className="text-[11px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-            Device
+            {t('Устройство', 'Device')}
           </h4>
           <div className="grid grid-cols-2 gap-2">
             {energy?.cpu_temp_c != null && (
-              <MiniStat icon={Thermometer} label="CPU Temp" value={String(Math.round(energy.cpu_temp_c))} unit="°C" />
+              <MiniStat icon={Thermometer} label={t('Температура ЦП', 'CPU Temp')} value={String(Math.round(energy.cpu_temp_c))} unit="°C" />
             )}
             {energy?.gpu_temp_c != null && (
-              <MiniStat icon={Thermometer} label="GPU Temp" value={String(Math.round(energy.gpu_temp_c))} unit="°C" />
+              <MiniStat icon={Thermometer} label={t('Температура ГП', 'GPU Temp')} value={String(Math.round(energy.gpu_temp_c))} unit="°C" />
             )}
             <MiniStat
               icon={Zap}
-              label="Power"
+              label={t('Мощность', 'Power')}
               value={(liveEnergy?.power_w ?? energy?.avg_power_w ?? 0).toFixed(1)}
-              unit="W"
+              unit={t('Вт', 'W')}
             />
             <MiniStat
               icon={Activity}
-              label="Energy"
+              label={t('Энергия', 'Energy')}
               value={(
                 ((liveEnergy?.energy_j ?? energy?.total_energy_j ?? 0) / 1000)
               ).toFixed(1)}
-              unit="kJ"
+              unit={t('кДж', 'kJ')}
             />
           </div>
         </section>
@@ -148,7 +150,7 @@ export function SystemPanel() {
         {/* Cost Comparison */}
         <section>
           <h4 className="text-[11px] font-medium uppercase tracking-wide mb-2" style={{ color: 'var(--color-text-tertiary)' }}>
-            Cost Comparison
+            {t('Сравнение затрат', 'Cost Comparison')}
           </h4>
 
           {/* Local */}
@@ -158,7 +160,7 @@ export function SystemPanel() {
           >
             <HardDrive size={14} style={{ color: 'var(--color-accent)' }} />
             <div className="flex-1 min-w-0">
-              <div className="text-xs font-medium truncate" style={{ color: 'var(--color-text)' }}>Local</div>
+              <div className="text-xs font-medium truncate" style={{ color: 'var(--color-text)' }}>{t('Локально', 'Local')}</div>
             </div>
             <div className="text-sm font-semibold" style={{ color: 'var(--color-success)' }}>
               ${(savings?.local_cost ?? 0).toFixed(4)}
@@ -216,7 +218,7 @@ export function SystemPanel() {
             className="text-[11px] font-medium uppercase tracking-wide mb-2"
             style={{ color: 'var(--color-text-tertiary)' }}
           >
-            Leaderboard
+            {t('Рейтинг', 'Leaderboard')}
           </h4>
 
           <button
@@ -243,7 +245,7 @@ export function SystemPanel() {
                 color: optInEnabled ? 'var(--color-accent)' : 'var(--color-text-secondary)',
               }}
             >
-              {optInEnabled ? 'Sharing Savings' : 'Share Your Savings'}
+              {optInEnabled ? t('Публикация экономии включена', 'Sharing Savings') : t('Поделиться данными об экономии', 'Share Your Savings')}
             </span>
             <span
               className="text-[9px] px-1.5 py-0.5 rounded-full"
@@ -252,7 +254,7 @@ export function SystemPanel() {
                 color: optInEnabled ? 'white' : 'var(--color-text-tertiary)',
               }}
             >
-              {optInEnabled ? 'ON' : 'OFF'}
+              {optInEnabled ? t('ВКЛ', 'ON') : t('ВЫКЛ', 'OFF')}
             </span>
           </button>
 
@@ -266,7 +268,7 @@ export function SystemPanel() {
             onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--color-text-tertiary)')}
           >
             <ExternalLink size={10} />
-            View Leaderboard
+            {t('Посмотреть рейтинг', 'View Leaderboard')}
           </a>
         </section>
       </div>

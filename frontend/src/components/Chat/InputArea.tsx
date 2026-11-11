@@ -11,7 +11,10 @@ import {
   resolveChatEngine,
 } from '../../lib/chat-telemetry';
 import { MicButton } from './MicButton';
+import { ConversationVoicePanel } from './ConversationVoicePanel';
 import { useSpeech } from '../../hooks/useSpeech';
+import { useTtsStore } from '../../lib/tts';
+import { t } from '../../lib/locale';
 import type {
   ChatMessage,
   MessageTelemetry,
@@ -81,6 +84,8 @@ function useResearchCorpusSync(enabled: boolean): {
 
 export function InputArea() {
   const [input, setInput] = useState('');
+  const [conversationVoiceActive, setConversationVoiceActive] = useState(false);
+  const conversationVoiceRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -127,7 +132,7 @@ export function InputArea() {
     prevModelRef.current = selectedModel;
   }, [selectedModel, streamState.isStreaming, resetStream]);
 
-  const micDisabled = !speechEnabled || !speechAvailable || streamState.isStreaming;
+  const micDisabled = conversationVoiceActive || !speechEnabled || !speechAvailable || streamState.isStreaming;
   const micReason: 'not-enabled' | 'no-backend' | 'streaming' | undefined =
     !speechEnabled ? 'not-enabled'
     : !speechAvailable ? 'no-backend'
@@ -171,15 +176,32 @@ export function InputArea() {
     resetStream();
   }, [resetStream]);
 
-  const sendMessage = useCallback(async () => {
-    const content = input.trim();
-    if (!content || streamState.isStreaming) return;
+  const onVoiceModeChange = useCallback((enabled: boolean) => {
+    conversationVoiceRef.current = enabled;
+    setConversationVoiceActive(enabled);
+    if (enabled) void useTtsStore.getState().ensureHealth();
+  }, []);
+
+  const onVoiceStart = useCallback(() => {
+    const current = useAppStore.getState();
+    const tts = useTtsStore.getState();
+    tts.stop();
+    if (current.streamState.isStreaming && current.streamState.conversationId === current.activeId) {
+      const last = current.messages[current.messages.length - 1];
+      if (last?.role === 'assistant') tts.markAutoSpoken(last.id);
+      stopStreaming();
+    }
+  }, [stopStreaming]);
+
+  const sendMessage = useCallback(async (voiceText?: string) => {
+    const content = (voiceText ?? input).trim();
+    if (!content || useAppStore.getState().streamState.isStreaming) return;
     if (!selectedModel) {
-      toast.error('Pick a model first (⌘K)');
+      toast.error(t('Сначала выбери модель (⌘K)', 'Pick a model first (⌘K)'));
       return;
     }
 
-    setInput('');
+    if (voiceText === undefined) setInput('');
 
     let convId = activeId;
     if (!convId) {
@@ -231,11 +253,12 @@ export function InputArea() {
       Array.from(researchSourcesByRef.values()).sort((a, b) => a.ref - b.ref);
     let lastFlush = 0;
     let ttftMs: number | undefined;
+    let generationFailed = false;
 
     setStreamState({
       conversationId: convId,
       isStreaming: true,
-      phase: deepResearch ? 'Researching...' : 'Generating...',
+      phase: deepResearch ? t('Исследую…', 'Researching...') : t('Готовлю ответ…', 'Generating...'),
       elapsedMs: 0,
       activeToolCalls: [],
       content: '',
@@ -454,13 +477,14 @@ export function InputArea() {
       }
       }
     } catch (err: any) {
+      generationFailed = true;
       if (err.name === 'AbortError') {
         // User cancelled or model switch — keep whatever was accumulated
-        if (!accumulatedContent) accumulatedContent = '(Generation stopped)';
+        if (!accumulatedContent) accumulatedContent = t('(Ответ остановлен)', '(Generation stopped)');
       } else {
         const errMsg = err?.message || String(err);
         accumulatedContent =
-          accumulatedContent || `Error: ${errMsg}`;
+          accumulatedContent || `${t('Ошибка', 'Error')}: ${errMsg}`;
         useAppStore.getState().addLogEntry({
           timestamp: Date.now(), level: 'error', category: 'chat',
           message: `Stream error: ${errMsg}`,
@@ -470,8 +494,10 @@ export function InputArea() {
       // numbers don't get stuck on the last sample.
       useAppStore.getState().setLiveEnergy(null);
     } finally {
+      if (abortRef.current !== controller) return;
+      const completedText = accumulatedContent;
       if (!accumulatedContent) {
-        accumulatedContent = 'No response was generated. Please try again.';
+        accumulatedContent = t('Ответ не получен. Попробуй ещё раз.', 'No response was generated. Please try again.');
       }
       const totalMs = Date.now() - startTime;
       const appState = useAppStore.getState();
@@ -508,6 +534,7 @@ export function InputArea() {
         // Not a digest response or server unavailable — skip
       }
 
+      if (abortRef.current !== controller) return;
       updateLastAssistant(
         convId,
         accumulatedContent,
@@ -521,6 +548,15 @@ export function InputArea() {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
+      }
+      if (
+        voiceText !== undefined && conversationVoiceRef.current && !generationFailed
+        && !controller.signal.aborted && completedText.trim()
+        && useAppStore.getState().activeId === convId
+      ) {
+        const tts = useTtsStore.getState();
+        tts.markAutoSpoken(assistantMsg.id);
+        void tts.speak(assistantMsg.id, completedText);
       }
       resetStream();
       useAppStore.getState().addLogEntry({
@@ -543,7 +579,6 @@ export function InputArea() {
     input,
     activeId,
     selectedModel,
-    streamState.isStreaming,
     createConversation,
     addMessage,
     updateLastAssistant,
@@ -562,8 +597,16 @@ export function InputArea() {
   };
 
   return (
-    <div className="px-4 pb-4 pt-2" style={{ maxWidth: 'var(--chat-max-width)', margin: '0 auto', width: '100%' }}>
+    <div className="shrink-0 px-4 pb-4 pt-2" style={{ maxWidth: 'var(--chat-max-width)', margin: '0 auto', width: '100%' }}>
       <div className="mb-2 flex flex-col gap-1">
+        <ConversationVoicePanel
+          canStart={Boolean(selectedModel) && speechState === 'idle' && !modelLoading}
+          canSend={Boolean(selectedModel) && !modelLoading && !streamState.isStreaming}
+          thinking={isCurrentChatStreaming}
+          onModeChange={onVoiceModeChange}
+          onSpeechStart={onVoiceStart}
+          onUtterance={(text) => { void sendMessage(text); }}
+        />
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -579,7 +622,7 @@ export function InputArea() {
             title={deepResearch ? 'Deep Research: on' : 'Deep Research: off'}
           >
             <Search size={12} />
-            Deep Research
+            {t('Глубокий поиск', 'Deep Research')}
           </button>
         </div>
         {deepResearch && corpusSync.syncing && corpusSync.itemsSynced > 0 && (
@@ -608,7 +651,7 @@ export function InputArea() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={selectedModel ? 'Message OpenJarvis...' : 'Pick a model first (⌘K)...'}
+          placeholder={selectedModel ? t('Сообщение Джарвису…', 'Message OpenJarvis...') : t('Выбери модель (⌘K)…', 'Pick a model first (⌘K)...')}
           rows={1}
           className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed"
           style={{ color: 'var(--color-text)', maxHeight: '200px' }}
@@ -619,7 +662,7 @@ export function InputArea() {
             onClick={stopStreaming}
             className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer"
             style={{ background: 'var(--color-error)', color: 'var(--color-on-accent)' }}
-            title="Stop generating"
+            title={t('Остановить ответ', 'Stop generating')}
           >
             <Square size={16} />
           </button>
@@ -632,9 +675,9 @@ export function InputArea() {
               reason={micReason}
             />
             <button
-              onClick={sendMessage}
+              onClick={() => { void sendMessage(); }}
               disabled={streamState.isStreaming || !input.trim() || modelLoading || !selectedModel}
-              title={selectedModel ? 'Send message' : 'Pick a model first (⌘K)'}
+              title={selectedModel ? t('Отправить сообщение', 'Send message') : t('Выбери модель (⌘K)', 'Pick a model first (⌘K)')}
               className="p-2 rounded-xl transition-colors shrink-0 cursor-pointer disabled:opacity-30 disabled:cursor-default"
               style={{
                 background: input.trim() ? 'var(--color-accent)' : 'var(--color-bg-tertiary)',
@@ -648,8 +691,8 @@ export function InputArea() {
       </div>
       <div className="flex items-center justify-center mt-2 text-[11px]" style={{ color: 'var(--color-text-tertiary)' }}>
         <span>
-          <kbd className="font-mono">Enter</kbd> to send &middot;{' '}
-          <kbd className="font-mono">Shift+Enter</kbd> for new line
+          <kbd className="font-mono">Enter</kbd> {t('отправить', 'to send')} &middot;{' '}
+          <kbd className="font-mono">Shift+Enter</kbd> {t('новая строка', 'for new line')}
         </span>
       </div>
     </div>

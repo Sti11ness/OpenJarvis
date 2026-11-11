@@ -11,13 +11,14 @@ import {
 } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { isEmbedOnlyModel } from '../lib/model-capabilities';
+import { t, uiLabels, uiLanguage } from '../lib/locale';
 import type { ModelInfo } from '../types';
 import { InferenceRecoveryButton, InferenceSourceSetup } from './InferenceSourceSetup';
 
 const STEPS = [
-  { key: 'ollama_ready', label: 'Inference Engine', icon: Cpu, detail: 'Starting Ollama...' },
-  { key: 'model_ready', label: 'AI Model', icon: Database, detail: 'Loading model...' },
-  { key: 'server_ready', label: 'API Server', icon: Server, detail: 'Starting server...' },
+  { key: 'ollama_ready', label: t('Среда запуска', 'Inference Engine'), icon: Cpu, detail: t('Запускаем Ollama…', 'Starting Ollama...') },
+  { key: 'model_ready', label: t('Модель', 'AI Model'), icon: Database, detail: uiLabels.loadingModel },
+  { key: 'server_ready', label: t('Сервер API', 'API Server'), icon: Server, detail: t('Запускаем сервер…', 'Starting server...') },
 ] as const;
 
 const REMOTE_SETUP: Partial<Record<SetupStatus['source'], {
@@ -27,24 +28,49 @@ const REMOTE_SETUP: Partial<Record<SetupStatus['source'], {
   modelLabel?: string;
 }>> = {
   custom: {
-    summary: 'Connecting to your AI server...',
-    engine: 'Connecting to your server...',
-    model: 'Checking endpoint...',
-    modelLabel: 'Endpoint',
+    summary: t('Подключаемся к вашему серверу моделей…', 'Connecting to your AI server...'),
+    engine: t('Подключаемся к серверу…', 'Connecting to your server...'),
+    model: t('Проверяем адрес сервера…', 'Checking endpoint...'),
+    modelLabel: t('Адрес сервера', 'Endpoint'),
   },
   codex: {
-    summary: 'Connecting to Codex via ChatGPT...',
-    engine: 'Starting the Codex app server...',
-    model: 'Checking Codex access...',
+    summary: t('Подключаемся к Codex через ChatGPT…', 'Connecting to Codex via ChatGPT...'),
+    engine: t('Запускаем сервер Codex…', 'Starting the Codex app server...'),
+    model: t('Проверяем доступ к Codex…', 'Checking Codex access...'),
   },
   openai: {
-    summary: 'Connecting to the OpenAI API...',
-    engine: 'Connecting to OpenAI...',
-    model: 'Checking model access...',
+    summary: t('Подключаемся к OpenAI API…', 'Connecting to the OpenAI API...'),
+    engine: t('Подключаемся к OpenAI…', 'Connecting to OpenAI...'),
+    model: t('Проверяем доступ к модели…', 'Checking model access...'),
   },
 };
 
 type StepKey = (typeof STEPS)[number]['key'];
+
+const SETUP_STATUS_RU: Record<string, string> = {
+  'Choose where OpenJarvis should run models.': 'Выберите источник моделей.',
+  'Initializing...': 'Подготавливаем запуск…',
+  'Starting inference engine...': 'Запускаем среду для моделей…',
+  'Inference engine ready.': 'Среда запуска готова.',
+  'Model ready.': 'Модель готова.',
+  'Connected to custom endpoint.': 'Подключение к серверу установлено.',
+  'Starting API server...': 'Запускаем сервер API…',
+  'Downloading OpenJarvis (first launch)...': 'Скачиваем OpenJarvis для первого запуска…',
+  'Installing dependencies (uv sync — may take 1-2 min on first boot)...': 'Устанавливаем зависимости. При первом запуске это может занять 1–2 минуты.',
+  'Verifying Rust extension (openjarvis_rust)...': 'Проверяем расширение openjarvis_rust…',
+  'All systems ready.': 'Всё готово.',
+};
+
+export function localizeSetupDetail(detail: string): string {
+  if (uiLanguage === 'en') return detail;
+  return SETUP_STATUS_RU[detail] ?? detail
+    .replace(/^Checking for (.+)\.\.\.$/, 'Проверяем наличие $1…')
+    .replace(/^Downloading (.+)\.\.\.(?: \(this may take a minute\))?$/, 'Скачиваем $1…')
+    .replace(/^Using installed model (.+)\.$/, 'Используем установленную модель $1.')
+    .replace(/^Connecting to (.+)\.\.\.$/, 'Подключаемся к $1…')
+    .replace(/^Starting API server from (.+)\.\.\.$/, 'Запускаем сервер API из $1…')
+    .replace(/^Connected to existing API server on port (\d+)\.$/, 'Подключились к работающему серверу API на порту $1.');
+}
 
 function isManagedRemoteSource(source: SetupStatus['source']): boolean {
   return source === 'codex' || source === 'openai';
@@ -100,7 +126,7 @@ function StepRow({
           {label}
         </div>
         <div className="text-xs truncate" style={{ color: 'var(--color-text-tertiary)', maxWidth: '280px' }}>
-          {done ? 'Ready' : active ? detail : 'Waiting...'}
+          {done ? t('Готово', 'Ready') : active ? detail : t('Ожидание…', 'Waiting...')}
         </div>
       </div>
       <div className="shrink-0">
@@ -225,8 +251,8 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
           </h1>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             {!statusChecked
-              ? 'Checking your saved setup...'
-              : remote?.summary ?? 'Setting up your local AI...'}
+              ? t('Проверяем сохранённые настройки…', 'Checking your saved setup...')
+              : remote?.summary ?? t('Настраиваем локальную модель…', 'Setting up your local AI...')}
           </p>
         </div>
 
@@ -241,7 +267,7 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
               active={activeStep === step.key}
               detail={
                 activeStep === step.key && status?.detail
-                  ? status.detail
+                  ? localizeSetupDetail(status.detail)
                   : step.detail
               }
             />

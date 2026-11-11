@@ -9,6 +9,7 @@ import {
   startBackend,
   type InferenceSource,
 } from '../lib/api';
+import { t, uiLabels } from '../lib/locale';
 
 type InferenceSourceChoice = InferenceSource['kind'];
 export type InferenceSetupStep = 'choose' | InferenceSourceChoice;
@@ -71,10 +72,10 @@ function SetupFrame({ children }: { children: React.ReactNode }) {
             <Cpu size={32} />
           </div>
           <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-            Choose your inference source
+            {t('Выберите источник моделей', 'Choose your inference source')}
           </h1>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-            Nothing is installed, started, or downloaded until you confirm a choice.
+            {t('Настройка начнётся после подтверждения выбора.', 'Nothing is installed, started, or downloaded until you confirm a choice.')}
           </p>
         </div>
         <div
@@ -94,19 +95,25 @@ export function InferenceSourceChooser({
   onChoose: (source: InferenceSourceChoice) => void;
 }) {
   const sources = [
-    { kind: 'codex', icon: LogIn, title: 'Codex via ChatGPT', detail: 'Use your ChatGPT account through the Codex app server.' },
-    { kind: 'openai', icon: KeyRound, title: 'OpenAI API key', detail: 'Use a model and API key from your OpenAI project.' },
+    { kind: 'codex', icon: LogIn, title: uiLabels.codex, detail: t('Подключение к Codex через вашу учётную запись ChatGPT.', 'Use your ChatGPT account through the Codex app server.') },
+    { kind: 'openai', icon: KeyRound, title: uiLabels.openaiKey, detail: t('Модель и ключ API из вашего проекта OpenAI.', 'Use a model and API key from your OpenAI project.') },
     {
       kind: 'ollama',
       icon: Cpu,
-      title: 'Local Ollama',
-      detail: 'Run models on this computer. Requires a separate confirmation before Ollama starts or a model downloads.',
+      title: t('Локальная Ollama', 'Local Ollama'),
+      detail: t(
+        'Модели работают на этом компьютере. Запуск Ollama и загрузку модели нужно подтвердить отдельно.',
+        'Run models on this computer. Requires a separate confirmation before Ollama starts or a model downloads.',
+      ),
     },
     {
       kind: 'custom',
       icon: Server,
-      title: 'OpenAI-compatible server',
-      detail: 'Connect to LM Studio, vLLM, SGLang, llama.cpp, MLX, or another compatible endpoint.',
+      title: t('OpenAI-совместимый сервер', 'OpenAI-compatible server'),
+      detail: t(
+        'Подключите LM Studio, vLLM, SGLang, llama.cpp, MLX или другой совместимый сервер.',
+        'Connect to LM Studio, vLLM, SGLang, llama.cpp, MLX, or another compatible endpoint.',
+      ),
     },
   ] as const;
   return (
@@ -136,7 +143,7 @@ export function InferenceSourceChooser({
   );
 }
 
-function BackButton({ onClick, label = 'Back', disabled = false }: { onClick: () => void; label?: string; disabled?: boolean }) {
+function BackButton({ onClick, label = uiLabels.back, disabled = false }: { onClick: () => void; label?: string; disabled?: boolean }) {
   return (
     <button
       type="button"
@@ -170,7 +177,7 @@ export function InferenceRecoveryButton({
         background: 'var(--color-surface)',
       }}
     >
-      {recovering ? 'Stopping setup...' : 'Change inference source'}
+      {recovering ? t('Останавливаем настройку…', 'Stopping setup...') : t('Сменить источник моделей', 'Change inference source')}
     </button>
   );
 }
@@ -193,10 +200,13 @@ export function OllamaConsent({
         <Download size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
         <div>
           <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-            Allow local model setup?
+            {t('Начать настройку локальной модели?', 'Allow local model setup?')}
           </h2>
           <p className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
-            OpenJarvis will start Ollama and may download one model selected for this computer. Model downloads can use several gigabytes of disk space and network data.
+            {t(
+              'OpenJarvis запустит Ollama и при необходимости скачает модель, подходящую для этого компьютера. Для загрузки может потребоваться несколько гигабайт трафика и места на диске.',
+              'OpenJarvis will start Ollama and may download one model selected for this computer. Model downloads can use several gigabytes of disk space and network data.',
+            )}
           </p>
         </div>
       </div>
@@ -205,7 +215,7 @@ export function OllamaConsent({
         style={{ background: 'var(--color-accent-subtle)', color: 'var(--color-text-secondary)' }}
       >
         <ShieldCheck size={16} className="shrink-0" style={{ color: 'var(--color-accent)' }} />
-        Going back leaves Ollama stopped and does not save this choice.
+        {t('Кнопка «Назад» возвращает к выбору источника.', 'Going back leaves Ollama stopped and does not save this choice.')}
       </div>
       {error && <SetupError message={error} />}
       <button
@@ -216,7 +226,7 @@ export function OllamaConsent({
         style={{ background: 'var(--color-accent)', color: 'white' }}
       >
         {busy && <Loader2 size={16} className="animate-spin" />}
-        {busy ? 'Starting local setup...' : 'Use Ollama and continue'}
+        {busy ? t('Настраиваем локальный запуск…', 'Starting local setup...') : t('Использовать Ollama', 'Use Ollama and continue')}
       </button>
     </SetupFrame>
   );
@@ -265,16 +275,16 @@ export function CodexAccountSetup({
         <LogIn size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
         <div>
           <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-            Codex via ChatGPT
+            {uiLabels.codex}
           </h2>
           <p role="status" className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
             {signedIn
-              ? 'Codex is signed in with ChatGPT on this computer.'
+              ? t('Codex уже подключён к ChatGPT на этом компьютере.', 'Codex is signed in with ChatGPT on this computer.')
               : checking
-                ? 'Checking your Codex sign-in...'
+                ? t('Проверяем вход в Codex…', 'Checking your Codex sign-in...')
                 : signingIn
-                  ? 'Complete the Codex sign-in in your browser.'
-                  : 'Sign in to Codex with your ChatGPT account to continue.'}
+                  ? t('Завершите вход в Codex в браузере.', 'Complete the Codex sign-in in your browser.')
+                  : t('Войдите в Codex через учётную запись ChatGPT.', 'Sign in to Codex with your ChatGPT account to continue.')}
           </p>
         </div>
       </div>
@@ -288,14 +298,14 @@ export function CodexAccountSetup({
       >
         {(busy || checking || signingIn) && <Loader2 size={16} className="animate-spin" />}
         {busy
-          ? 'Starting Codex...'
+          ? t('Запускаем Codex…', 'Starting Codex...')
           : checking
-            ? 'Checking sign-in...'
+            ? t('Проверяем вход…', 'Checking sign-in...')
             : signingIn
-              ? 'Signing in...'
+              ? t('Входим…', 'Signing in...')
               : signedIn
-                ? 'Continue'
-                : 'Sign in with ChatGPT'}
+                ? t('Продолжить', 'Continue')
+                : t('Войти через ChatGPT', 'Sign in with ChatGPT')}
       </button>
     </SetupFrame>
   );
@@ -333,16 +343,16 @@ export function OpenAIKeySetup({
       <form onSubmit={submit} className="flex flex-col gap-4">
         <div>
           <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-            Connect to OpenAI
+            {t('Подключение к OpenAI', 'Connect to OpenAI')}
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            Enter a model ID and an API key from your OpenAI project.
+            {t('Введите идентификатор модели и ключ API из своего проекта OpenAI.', 'Enter a model ID and an API key from your OpenAI project.')}
           </p>
         </div>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Model ID
+          {uiLabels.modelId}
           <input
-            aria-label="Model ID"
+            aria-label={uiLabels.modelId}
             type="text"
             required
             disabled={busy}
@@ -355,9 +365,9 @@ export function OpenAIKeySetup({
           />
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          OpenAI API key
+          {uiLabels.openaiKey}
           <input
-            aria-label="OpenAI API key"
+            aria-label={uiLabels.openaiKey}
             type="password"
             required
             disabled={busy}
@@ -376,7 +386,7 @@ export function OpenAIKeySetup({
           style={{ background: 'var(--color-accent)', color: 'white' }}
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          {busy ? 'Connecting...' : 'Save and connect'}
+          {busy ? uiLabels.connecting : uiLabels.saveAndConnect}
         </button>
       </form>
     </SetupFrame>
@@ -412,20 +422,23 @@ export function CustomEndpointSetup({
 
   return (
     <SetupFrame>
-      <BackButton onClick={onCancel} label="Cancel" disabled={busy} />
+      <BackButton onClick={onCancel} label={uiLabels.cancel} disabled={busy} />
       <form onSubmit={submit} className="flex flex-col gap-4">
         <div>
           <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
-            Connect your server
+            {t('Подключение к своему серверу', 'Connect your server')}
           </h2>
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            OpenJarvis will connect only after you submit this form. Ollama will not start or download models.
+            {t(
+              'Подключение к указанному серверу начнётся после отправки формы.',
+              'OpenJarvis will connect only after you submit this form. Ollama will not start or download models.',
+            )}
           </p>
         </div>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Server URL
+          {t('Адрес сервера', 'Server URL')}
           <input
-            aria-label="Server URL"
+            aria-label={t('Адрес сервера', 'Server URL')}
             type="url"
             required
             value={host}
@@ -435,9 +448,9 @@ export function CustomEndpointSetup({
           />
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Model ID
+          {uiLabels.modelId}
           <input
-            aria-label="Model ID"
+            aria-label={uiLabels.modelId}
             type="text"
             required
             value={model}
@@ -448,9 +461,9 @@ export function CustomEndpointSetup({
           />
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          Server type
+          {t('Тип сервера', 'Server type')}
           <select
-            aria-label="Server type"
+            aria-label={t('Тип сервера', 'Server type')}
             value={engine}
             onChange={(event) => setEngine(event.target.value)}
             className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
@@ -464,9 +477,9 @@ export function CustomEndpointSetup({
           </select>
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
-          API key (optional)
+          {t('Ключ API (необязательно)', 'API key (optional)')}
           <input
-            aria-label="API key"
+            aria-label={t('Ключ API', 'API key')}
             type="password"
             value={apiKey}
             onChange={(event) => setApiKey(event.target.value)}
@@ -483,7 +496,7 @@ export function CustomEndpointSetup({
           style={{ background: 'var(--color-accent)', color: 'white' }}
         >
           {busy && <Loader2 size={16} className="animate-spin" />}
-          {busy ? 'Connecting...' : 'Save and connect'}
+          {busy ? uiLabels.connecting : uiLabels.saveAndConnect}
         </button>
       </form>
     </SetupFrame>
@@ -523,7 +536,7 @@ export function InferenceSourceSetup({ onStarted }: { onStarted: () => void }) {
     try {
       const signedIn = await loginToCodex();
       setCodexStatus(signedIn ? 'signed-in' : 'signed-out');
-      if (!signedIn) setError('Codex sign-in was not completed. Try signing in again.');
+      if (!signedIn) setError(t('Вход в Codex не завершён. Попробуйте ещё раз.', 'Codex sign-in was not completed. Try signing in again.'));
     } catch (err) {
       setCodexStatus('signed-out');
       setError(err instanceof Error ? err.message : String(err));

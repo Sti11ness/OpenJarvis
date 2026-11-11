@@ -1,5 +1,21 @@
+// Modified in the personal Jarvis fork.
+import { uiLanguage } from '../../lib/locale';
+
 interface Props {
   phase: string;
+}
+
+const PHASE_RU: Record<string, string> = {
+  'Researching...': 'Исследуем тему…',
+  'Generating...': 'Готовим ответ…',
+  'Agent thinking...': 'Агент обдумывает запрос…',
+};
+
+function displayPhase(phase: string): string {
+  if (uiLanguage === 'en') return phase;
+  return PHASE_RU[phase] ?? phase
+    .replace(/^Searching: (.+)$/, 'Ищем «$1»…')
+    .replace(/^Calling (.+)\.\.\.$/, 'Вызываем инструмент $1…');
 }
 
 export function StreamingDots({ phase }: Props) {
@@ -21,7 +37,7 @@ export function StreamingDots({ phase }: Props) {
       </div>
       {phase && (
         <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-          {phase}
+          {displayPhase(phase)}
         </span>
       )}
     </div>

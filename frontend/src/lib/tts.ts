@@ -13,6 +13,7 @@ export type TtsState = 'idle' | 'loading' | 'speaking';
  */
 interface TtsStore {
   state: TtsState;
+  level: number;
   /** id of the message currently loading or speaking, if any. */
   speakingId: string | null;
   error: string | null;
@@ -35,6 +36,32 @@ let objectUrl: string | null = null;
 let controller: AbortController | null = null;
 let token = 0;
 let healthProbe: Promise<void> | null = null;
+let levelTimer: ReturnType<typeof setInterval> | null = null;
+
+async function watchVoiceLevel(blob: Blob, element: HTMLAudioElement, mine: number): Promise<void> {
+  if (typeof OfflineAudioContext === 'undefined') return;
+  try {
+    const context = new OfflineAudioContext(1, 1, 22050);
+    const decoded = await context.decodeAudioData(await blob.arrayBuffer());
+    if (mine !== token || audio !== element) return;
+    const samples = decoded.getChannelData(0);
+    const width = Math.max(1, Math.floor(decoded.sampleRate / 20));
+    const envelope = new Float32Array(Math.ceil(samples.length / width));
+    for (let bin = 0; bin < envelope.length; bin += 1) {
+      const start = bin * width;
+      const end = Math.min(start + width, samples.length);
+      let power = 0;
+      for (let i = start; i < end; i += 1) power += samples[i] ** 2;
+      envelope[bin] = Math.min(1, Math.sqrt(power / (end - start)) * 3.5);
+    }
+    levelTimer = setInterval(() => {
+      const level = envelope[Math.floor(element.currentTime * decoded.sampleRate / width)] || 0;
+      if (Math.abs(level - useTtsStore.getState().level) >= .02) useTtsStore.setState({ level });
+    }, 50);
+  } catch {
+    // The voice still plays if this browser cannot decode a separate meter.
+  }
+}
 
 /** Only a stream ending in the active conversation may trigger autoplay. */
 export function shouldAutoplayFinishedReply(
@@ -53,6 +80,10 @@ export function shouldAutoplayFinishedReply(
 }
 
 function teardown(): void {
+  if (levelTimer !== null) {
+    clearInterval(levelTimer);
+    levelTimer = null;
+  }
   if (audio) {
     // Detach first: clearing src re-runs the media load algorithm, which fails
     // on an empty source and dispatches an `error` event. With the handler
@@ -76,6 +107,7 @@ function teardown(): void {
 
 export const useTtsStore = create<TtsStore>((set, get) => ({
   state: 'idle',
+  level: 0,
   speakingId: null,
   error: null,
   errorId: null,
@@ -107,7 +139,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
     token += 1;
     const mine = token;
     teardown();
-    set({ state: 'loading', speakingId: id, error: null, errorId: null });
+    set({ state: 'loading', level: 0, speakingId: id, error: null, errorId: null });
 
     const ac = new AbortController();
     controller = ac;
@@ -124,22 +156,26 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       el.onended = () => {
         if (mine !== token) return;
         teardown();
-        set({ state: 'idle', speakingId: null });
+        set({ state: 'idle', level: 0, speakingId: null });
       };
       el.onerror = () => {
         if (mine !== token) return;
         teardown();
-        set({ state: 'idle', speakingId: null, error: 'Playback failed', errorId: id });
+        set({ state: 'idle', level: 0, speakingId: null, error: 'Playback failed', errorId: id });
       };
 
       await el.play();
-      if (mine === token) set({ state: 'speaking', speakingId: id });
+      if (mine === token) {
+        set({ state: 'speaking', speakingId: id });
+        void watchVoiceLevel(blob, el, mine);
+      }
     } catch (err) {
       if (mine !== token) return;
       if (err instanceof DOMException && err.name === 'AbortError') return;
       teardown();
       set({
         state: 'idle',
+        level: 0,
         speakingId: null,
         error: err instanceof Error ? err.message : 'Speech synthesis failed',
         errorId: id,
@@ -150,7 +186,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
   stop: () => {
     token += 1;
     teardown();
-    set({ state: 'idle', speakingId: null, error: null, errorId: null });
+    set({ state: 'idle', level: 0, speakingId: null, error: null, errorId: null });
   },
 }));
 
@@ -161,6 +197,7 @@ export function __resetTtsForTests(): void {
   healthProbe = null;
   useTtsStore.setState({
     state: 'idle',
+    level: 0,
     speakingId: null,
     error: null,
     errorId: null,

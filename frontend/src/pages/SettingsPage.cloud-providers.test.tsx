@@ -9,9 +9,10 @@ describe('desktop cloud provider settings', () => {
     const html = renderToStaticMarkup(<SettingsPage />);
 
     expect(html).toContain('Atlas Cloud');
-    const atlasKeyInput = html.match(/<input[^>]*placeholder="Atlas Cloud API key"[^>]*>/)?.[0];
+    const atlasKeyInput = html.match(/<input[^>]*placeholder="Ключ Atlas Cloud API"[^>]*>/)?.[0];
     expect(atlasKeyInput).toBeDefined();
     expect(atlasKeyInput).not.toContain('disabled');
     vi.unstubAllGlobals();
   });
 });
+// Modified in the personal Jarvis fork.

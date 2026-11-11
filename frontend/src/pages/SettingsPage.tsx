@@ -35,8 +35,12 @@ import {
   type InferenceSource,
   type MemoryStats,
 } from '../lib/api';
+import { t, uiLabels } from '../lib/locale';
 
 const CLOUD_KEY_STATUS_CHANGED = 'openjarvis-cloud-key-status-changed';
+const SAVED = t('Сохранено', 'Saved');
+const CHECKING = t('Проверяем…', 'Checking...');
+const NOT_CONFIGURED = t('Требуется настройка', 'Not configured');
 
 function OllamaModelList() {
   const [models, setModels] = useState<Array<{ name: string; size: number }>>([]);
@@ -46,14 +50,14 @@ function OllamaModelList() {
       .then(data => setModels((data.models || []).map((m: any) => ({ name: m.name, size: m.size }))))
       .catch(() => setModels([]));
   }, []);
-  if (models.length === 0) return <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>No models loaded</span>;
+  if (models.length === 0) return <span className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>{t('Модели не загружены', 'No models loaded')}</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {models.map(m => (
         <span key={m.name} className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px]"
           style={{ background: 'var(--color-bg-tertiary)', color: 'var(--color-text)' }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-success)', display: 'inline-block' }} />
-          {m.name} ({(m.size / 1e9).toFixed(1)} GB)
+          {m.name} ({(m.size / 1e9).toFixed(1)} {t('ГБ', 'GB')})
         </span>
       ))}
     </div>
@@ -116,7 +120,7 @@ function ApiKeyInput({
       window.dispatchEvent(new Event(CLOUD_KEY_STATUS_CHANGED));
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      setError(e?.message || 'Failed to save API key');
+      setError(e?.message || t('Не удалось сохранить ключ API', 'Failed to save API key'));
     }
   };
 
@@ -136,7 +140,7 @@ function ApiKeyInput({
       window.dispatchEvent(new Event(CLOUD_KEY_STATUS_CHANGED));
       setTimeout(() => setSaved(false), 2000);
     } catch (e: any) {
-      setError(e?.message || 'Failed to remove API key');
+      setError(e?.message || t('Не удалось удалить ключ API', 'Failed to remove API key'));
     }
   };
 
@@ -147,7 +151,9 @@ function ApiKeyInput({
         value={value}
         onChange={e => setValue(e.target.value)}
         onBlur={() => { if (value.trim()) void save(value); }}
-        placeholder={hasKey ? (desktopKeyStorage ? 'Saved in secure storage' : 'Saved by local server') : placeholder}
+        placeholder={hasKey
+          ? (desktopKeyStorage ? t('В защищённом хранилище', 'Saved in secure storage') : t('Сохранено на сервере', 'Saved by local server'))
+          : placeholder}
         disabled={!canManage}
         className="w-48 px-2 py-1 rounded text-xs"
         style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)' }} />
@@ -157,10 +163,10 @@ function ApiKeyInput({
           className="px-2 py-1 rounded text-[10px] cursor-pointer"
           style={{ color: 'var(--color-error)', border: '1px solid var(--color-error)' }}
         >
-          Remove
+          {t('Удалить', 'Remove')}
         </button>
       )}
-      {saved && <span className="text-[10px]" style={{ color: 'var(--color-success)' }}>Saved</span>}
+      {saved && <span className="text-[10px]" style={{ color: 'var(--color-success)' }}>{SAVED}</span>}
       {error && <span className="text-[10px]" style={{ color: 'var(--color-error)' }}>{error}</span>}
     </div>
   );
@@ -241,23 +247,22 @@ export function MemoryStatusRow({
   onRetry: () => void;
 }) {
   const stats = status.kind === 'ready' ? status.stats : null;
+  const entryCount = stats ? t(`Записей — ${stats.entries}`, `${stats.entries} entries`) : '';
   const description = status.kind === 'error'
     ? status.message
     : status.kind === 'loading'
-      ? 'Checking memory backend...'
+      ? t('Проверяем хранилище памяти…', 'Checking memory backend...')
       : stats?.backend === 'none'
-        ? 'Memory is not configured'
-        : `${stats?.backend} backend — ${stats?.entries} entries`;
+        ? t('Хранилище памяти не настроено', 'Memory is not configured')
+        : t(`Хранилище ${stats?.backend}. ${entryCount}`, `${stats?.backend} backend — ${entryCount}`);
   const label = status.kind === 'loading'
-    ? 'Checking...'
+    ? CHECKING
     : stats?.backend === 'none'
-      ? 'Not configured'
-      : stats
-        ? `${stats.entries} entries`
-        : 'Unavailable';
+      ? NOT_CONFIGURED
+      : entryCount || t('Недоступно', 'Unavailable');
 
   return (
-    <SettingRow label="Memory status" description={description}>
+    <SettingRow label={t("Состояние памяти", "Memory status")} description={description}>
       <div className="flex items-center gap-2">
         <Brain size={14} style={{ color: stats && stats.backend !== 'none' ? 'var(--color-accent)' : 'var(--color-text-tertiary)' }} />
         <span className="text-xs whitespace-nowrap" style={{ color: 'var(--color-text-secondary)' }}>
@@ -270,7 +275,7 @@ export function MemoryStatusRow({
             className="text-xs underline cursor-pointer whitespace-nowrap"
             style={{ color: 'var(--color-accent)' }}
           >
-            Retry
+            {t('Повторить', 'Retry')}
           </button>
         )}
       </div>
@@ -279,9 +284,9 @@ export function MemoryStatusRow({
 }
 
 const themeOptions: { value: ThemeMode; label: string; icon: typeof Sun }[] = [
-  { value: 'light', label: 'Light', icon: Sun },
-  { value: 'dark', label: 'Dark', icon: Moon },
-  { value: 'system', label: 'System', icon: Monitor },
+  { value: 'light', label: t('Светлая', 'Light'), icon: Sun },
+  { value: 'dark', label: t('Тёмная', 'Dark'), icon: Moon },
+  { value: 'system', label: t('Системная', 'System'), icon: Monitor },
 ];
 
 export function SettingsPage() {
@@ -342,9 +347,9 @@ export function SettingsPage() {
         await setInferenceSource({ kind: 'ollama' });
       }
       setConfiguredNativeSource(null);
-      setSrcMsg('Saved — restart the app to apply.');
+      setSrcMsg(t('Сохранено. Перезапустите приложение, чтобы применить изменения.', 'Saved — restart the app to apply.'));
     } catch (e: any) {
-      setSrcMsg(e?.message ?? 'Failed to save.');
+      setSrcMsg(e?.message ?? t('Не удалось сохранить настройки.', 'Failed to save.'));
     }
   }, [srcKind, customHost, customModel, customEngine, customKey]);
 
@@ -444,26 +449,26 @@ export function SettingsPage() {
         <header className="mb-6">
           <div className="flex items-center justify-between gap-3">
             <h1 className="text-lg font-semibold" style={{ color: 'var(--color-text)' }}>
-              Settings
+              {t('Настройки', 'Settings')}
             </h1>
             {saved && (
               <span className="flex items-center gap-1 text-xs px-2 py-1 rounded-full" style={{
                 background: 'var(--color-accent-subtle)',
                 color: 'var(--color-success)',
               }}>
-                <Check size={12} /> Saved
+                <Check size={12} /> {SAVED}
               </span>
             )}
           </div>
           <p className="text-sm mt-2 max-w-2xl" style={{ color: 'var(--color-text-secondary)' }}>
-            App preferences — appearance, model defaults, keyboard shortcuts, and data management.
+            {t('Оформление, параметры моделей, горячие клавиши и управление данными.', 'App preferences — appearance, model defaults, keyboard shortcuts, and data management.')}
           </p>
         </header>
 
         <div className="flex flex-col gap-4">
           {/* Appearance */}
-          <Section title="Appearance">
-            <SettingRow label="Theme" description="Choose how OpenJarvis looks">
+          <Section title={t("Внешний вид", "Appearance")}>
+            <SettingRow label={t("Тема", "Theme")} description={t("Оформление OpenJarvis", "Choose how OpenJarvis looks")}>
               <div className="flex gap-1 p-0.5 rounded-lg" style={{ background: 'var(--color-bg-secondary)' }}>
                 {themeOptions.map((opt) => {
                   const isActive = settings.theme === opt.value;
@@ -485,7 +490,7 @@ export function SettingsPage() {
                 })}
               </div>
             </SettingRow>
-            <SettingRow label="Font size">
+            <SettingRow label={t("Размер шрифта", "Font size")}>
               <select
                 value={settings.fontSize}
                 onChange={(e) => { updateSettings({ fontSize: e.target.value as any }); showSaved(); }}
@@ -496,27 +501,27 @@ export function SettingsPage() {
                   border: '1px solid var(--color-border)',
                 }}
               >
-                <option value="small">Small</option>
-                <option value="default">Default</option>
-                <option value="large">Large</option>
+                <option value="small">{t('Мелкий', 'Small')}</option>
+                <option value="default">{t('Обычный', 'Default')}</option>
+                <option value="large">{t('Крупный', 'Large')}</option>
               </select>
             </SettingRow>
           </Section>
 
           {/* Connection */}
-          <Section title="Connection">
-            <SettingRow label="Server status" description={serverInfo ? `${serverInfo.engine} / ${serverInfo.model}` : 'Not connected'}>
+          <Section title={t("Подключение", "Connection")}>
+            <SettingRow label={t('Состояние сервера', 'Server status')} description={serverInfo ? `${serverInfo.engine} / ${serverInfo.model}` : t('Нет подключения', 'Not connected')}>
               <div className="flex items-center gap-2">
                 <span
                   className="w-2 h-2 rounded-full"
                   style={{ background: healthy === true ? 'var(--color-success)' : healthy === false ? 'var(--color-error)' : 'var(--color-text-tertiary)' }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {healthy === true ? 'Connected' : healthy === false ? 'Disconnected' : 'Checking...'}
+                  {healthy === true ? t('Подключён', 'Connected') : healthy === false ? t('Отключён', 'Disconnected') : CHECKING}
                 </span>
               </div>
             </SettingRow>
-            <SettingRow label="API URL" description="Set if backend runs on a different port or host">
+            <SettingRow label={t("Адрес API", "API URL")} description={t("Укажите, если сервер работает на другом порту или компьютере", "Set if backend runs on a different port or host")}>
               <input
                 type="text"
                 value={settings.apiUrl}
@@ -530,7 +535,7 @@ export function SettingsPage() {
                 }}
               />
             </SettingRow>
-            <SettingRow label="API key" description="Required only if the server was started with an API key">
+            <SettingRow label={t("Ключ API", "API key")} description={t("Укажите, если сервер требует ключ API", "Required only if the server was started with an API key")}>
               <input
                 type="password"
                 value={settings.apiKey}
@@ -548,36 +553,36 @@ export function SettingsPage() {
           </Section>
 
           {/* Inference source */}
-          <Section title="Inference source">
-            <SettingRow label="Source" description="Where the app runs models. Applies after restart.">
+          <Section title={t("Источник моделей", "Inference source")}>
+            <SettingRow label={t("Источник", "Source")} description={t("Место запуска моделей. Изменения применяются после перезапуска.", "Where the app runs models. Applies after restart.")}>
               <select
                 value={srcKind}
                 onChange={(e) => { setSrcKind(e.target.value as InferenceSource['kind']); setSrcMsg(''); }}
                 className="text-sm px-3 py-1.5 rounded-lg outline-none w-56"
                 style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
               >
-                <option value="ollama">Bundled Ollama (default)</option>
-                <option value="custom">Custom OpenAI-compatible server</option>
+                <option value="ollama">{t('Встроенная Ollama (по умолчанию)', 'Bundled Ollama (default)')}</option>
+                <option value="custom">{t('Свой OpenAI-совместимый сервер', 'Custom OpenAI-compatible server')}</option>
                 {configuredNativeSource && (
                   <option value={configuredNativeSource}>
-                    {configuredNativeSource === 'codex' ? 'Codex via ChatGPT' : 'OpenAI API key'}
+                    {configuredNativeSource === 'codex' ? uiLabels.codex : uiLabels.openaiKey}
                   </option>
                 )}
               </select>
             </SettingRow>
             {srcKind === 'custom' && (
               <>
-                <SettingRow label="Server URL" description="e.g. LM Studio: http://localhost:1234/v1">
+                <SettingRow label={t("Адрес сервера", "Server URL")} description={t("Для LM Studio подойдёт http://localhost:1234/v1", "e.g. LM Studio: http://localhost:1234/v1")}>
                   <input type="text" value={customHost} onChange={(e) => { setCustomHost(e.target.value); setSrcMsg(''); }} placeholder="http://localhost:1234/v1"
                     className="text-sm px-3 py-1.5 rounded-lg outline-none w-56"
                     style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }} />
                 </SettingRow>
-                <SettingRow label="Model" description="Model id served by your endpoint">
+                <SettingRow label={t("Модель", "Model")} description={t("Идентификатор модели на вашем сервере", "Model id served by your endpoint")}>
                   <input type="text" value={customModel} onChange={(e) => { setCustomModel(e.target.value); setSrcMsg(''); }} placeholder="qwen2.5-7b-instruct"
                     className="text-sm px-3 py-1.5 rounded-lg outline-none w-56"
                     style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }} />
                 </SettingRow>
-                <SettingRow label="Server type" description="OpenAI-compatible engine">
+                <SettingRow label={t("Тип сервера", "Server type")} description={t("Среда, совместимая с OpenAI API", "OpenAI-compatible engine")}>
                   <select value={customEngine} onChange={(e) => { setCustomEngine(e.target.value); setSrcMsg(''); }}
                     className="text-sm px-3 py-1.5 rounded-lg outline-none w-56"
                     style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
@@ -588,8 +593,8 @@ export function SettingsPage() {
                     <option value="mlx">MLX</option>
                   </select>
                 </SettingRow>
-                <SettingRow label="API key (optional)" description="Only if your server requires one">
-                  <input type="password" value={customKey} onChange={(e) => { setCustomKey(e.target.value); setSrcMsg(''); }} placeholder="leave blank if none"
+                <SettingRow label={t("Ключ API (необязательно)", "API key (optional)")} description={t("Укажите, если сервер требует ключ", "Only if your server requires one")}>
+                  <input type="password" value={customKey} onChange={(e) => { setCustomKey(e.target.value); setSrcMsg(''); }} placeholder={t("Оставьте пустым, если ключа нет", "leave blank if none")}
                     className="text-sm px-3 py-1.5 rounded-lg outline-none w-56"
                     style={{ background: 'var(--color-bg-secondary)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }} />
                 </SettingRow>
@@ -600,20 +605,22 @@ export function SettingsPage() {
                 disabled={srcKind === 'codex' || srcKind === 'openai'}
                 className="text-sm px-3 py-1.5 rounded-lg outline-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ background: 'var(--color-accent, var(--color-bg-tertiary))', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
-                Save inference source
+                {t('Сохранить источник моделей', 'Save inference source')}
               </button>
             </SettingRow>
           </Section>
 
           {/* Models */}
-          <Section title="Models">
-            <SettingRow label="Local models (Ollama)" description="Models available for local inference">
+          <Section title={t("Модели", "Models")}>
+            <SettingRow label={t("Локальные модели (Ollama)", "Local models (Ollama)")} description={t("Модели для запуска на этом компьютере", "Models available for local inference")}>
               <OllamaModelList />
             </SettingRow>
             <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
-              Run <code className="px-1 py-0.5 rounded text-[11px]" style={{ background: 'var(--color-bg-tertiary)' }}>ollama pull &lt;model-name&gt;</code> in your terminal to add more models
+              {t('Чтобы добавить модель, выполните в терминале ', 'Run ')}
+              <code className="px-1 py-0.5 rounded text-[11px]" style={{ background: 'var(--color-bg-tertiary)' }}>ollama pull &lt;model-name&gt;</code>
+              {t('.', ' in your terminal to add more models')}
             </div>
-            <SettingRow label="Cloud providers" description="Green dot means API key is configured">
+            <SettingRow label={t("Облачные сервисы", "Cloud providers")} description={t("Зелёная точка означает, что ключ API настроен", "Green dot means API key is configured")}>
               <div className="flex flex-wrap gap-3">
                 <CloudProviderStatus label="OpenAI" keyName="OPENAI_API_KEY" />
                 <CloudProviderStatus label="Anthropic" keyName="ANTHROPIC_API_KEY" />
@@ -625,35 +632,35 @@ export function SettingsPage() {
           </Section>
 
           {/* API Keys */}
-          <Section title="API Keys">
-            <SettingRow label="OpenAI" description="GPT-4, GPT-3.5, etc.">
+          <Section title={t("Ключи API", "API Keys")}>
+            <SettingRow label="OpenAI" description={t("Модели OpenAI", "GPT-4, GPT-3.5, etc.")}>
               <ApiKeyInput keyName="OPENAI_API_KEY" placeholder="sk-..." />
             </SettingRow>
-            <SettingRow label="Anthropic" description="Claude models">
+            <SettingRow label="Anthropic" description={t("Модели Claude", "Claude models")}>
               <ApiKeyInput keyName="ANTHROPIC_API_KEY" placeholder="sk-ant-..." />
             </SettingRow>
-            <SettingRow label="Google" description="Gemini models">
+            <SettingRow label="Google" description={t("Модели Gemini", "Gemini models")}>
               <ApiKeyInput keyName="GEMINI_API_KEY" placeholder="AI..." />
             </SettingRow>
-            <SettingRow label="OpenRouter" description="Multi-provider routing">
+            <SettingRow label="OpenRouter" description={t("Доступ к моделям разных поставщиков", "Multi-provider routing")}>
               <ApiKeyInput keyName="OPENROUTER_API_KEY" placeholder="sk-or-..." />
             </SettingRow>
-            <SettingRow label="Atlas Cloud" description="Models routed through Atlas Cloud">
-              <ApiKeyInput keyName="ATLASCLOUD_API_KEY" placeholder="Atlas Cloud API key" />
+            <SettingRow label="Atlas Cloud" description={t("Модели через Atlas Cloud", "Models routed through Atlas Cloud")}>
+              <ApiKeyInput keyName="ATLASCLOUD_API_KEY" placeholder={t("Ключ Atlas Cloud API", "Atlas Cloud API key")} />
             </SettingRow>
           </Section>
 
           {/* Tools */}
-          <Section title="Tools">
-            <SettingRow label="Web Search" description="Tavily key for web search tool">
+          <Section title={t("Инструменты", "Tools")}>
+            <SettingRow label={t("Поиск в интернете", "Web Search")} description={t("Ключ Tavily для поиска в интернете", "Tavily key for web search tool")}>
               <ApiKeyInput keyName="TAVILY_API_KEY" placeholder="tvly-..." toolName="web_search" />
             </SettingRow>
           </Section>
 
           {/* Memory */}
-          <Section title="Memory">
+          <Section title={t("Память", "Memory")}>
             <MemoryStatusRow status={memoryStatus} onRetry={() => { void refreshMemoryStatus(); }} />
-            <SettingRow label="Use memory context" description="Automatically inject relevant memories into conversations">
+            <SettingRow label={t("Использовать память в чате", "Use memory context")} description={t("Добавлять подходящие записи памяти в контекст разговора", "Automatically inject relevant memories into conversations")}>
               <button
                 onClick={() => {
                   const next = !memoryEnabled;
@@ -675,7 +682,7 @@ export function SettingsPage() {
                 />
               </button>
             </SettingRow>
-            <SettingRow label="Memory backend" description="Which retrieval engine to use">
+            <SettingRow label={t("Хранилище памяти", "Memory backend")} description={t("Способ поиска по памяти", "Which retrieval engine to use")}>
               <select
                 value={memoryBackend}
                 onChange={(e) => {
@@ -697,7 +704,7 @@ export function SettingsPage() {
                 <option value="hybrid">hybrid</option>
               </select>
             </SettingRow>
-            <SettingRow label="Results to inject" description={`${memoryTopK}`}>
+            <SettingRow label={t("Число записей для контекста", "Results to inject")} description={`${memoryTopK}`}>
               <input
                 type="range"
                 min="1"
@@ -713,7 +720,7 @@ export function SettingsPage() {
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
               />
             </SettingRow>
-            <SettingRow label="Min relevance score" description={`${memoryMinScore}`}>
+            <SettingRow label={t("Минимальная релевантность", "Min relevance score")} description={`${memoryMinScore}`}>
               <input
                 type="range"
                 min="0"
@@ -729,7 +736,7 @@ export function SettingsPage() {
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
               />
             </SettingRow>
-            <SettingRow label="Max context tokens" description={`${memoryMaxTokens}`}>
+            <SettingRow label={t("Предел токенов контекста", "Max context tokens")} description={`${memoryMaxTokens}`}>
               <input
                 type="range"
                 min="256"
@@ -748,8 +755,8 @@ export function SettingsPage() {
           </Section>
 
           {/* Model defaults */}
-          <Section title="Model Defaults">
-            <SettingRow label="Temperature" description={`${settings.temperature}`}>
+          <Section title={t("Параметры модели по умолчанию", "Model Defaults")}>
+            <SettingRow label={t("Температура", "Temperature")} description={`${settings.temperature}`}>
               <input
                 type="range"
                 min="0"
@@ -760,7 +767,7 @@ export function SettingsPage() {
                 className="w-32 cursor-pointer accent-[var(--color-accent)]"
               />
             </SettingRow>
-            <SettingRow label="Max tokens" description={`${settings.maxTokens}`}>
+            <SettingRow label={t("Предел токенов", "Max tokens")} description={`${settings.maxTokens}`}>
               <input
                 type="range"
                 min="256"
@@ -774,8 +781,8 @@ export function SettingsPage() {
           </Section>
 
           {/* Speech */}
-          <Section title="Speech">
-            <SettingRow label="Speech-to-Text" description="Enable microphone input for voice dictation">
+          <Section title={t("Речь", "Speech")}>
+            <SettingRow label={t("Распознавание речи", "Speech-to-Text")} description={t("Разрешить диктовку через микрофон", "Enable microphone input for voice dictation")}>
               <button
                 onClick={() => { updateSettings({ speechEnabled: !settings.speechEnabled }); showSaved(); }}
                 className="relative w-11 h-6 rounded-full transition-colors cursor-pointer"
@@ -792,7 +799,7 @@ export function SettingsPage() {
                 />
               </button>
             </SettingRow>
-            <SettingRow label="Text-to-Speech" description="Show a read-aloud button on assistant replies">
+            <SettingRow label={t("Озвучка текста", "Text-to-Speech")} description={t("Показывать кнопку озвучки под ответами", "Show a read-aloud button on assistant replies")}>
               <button
                 onClick={() => { updateSettings({ voiceOutputEnabled: !settings.voiceOutputEnabled }); showSaved(); }}
                 className="relative w-11 h-6 rounded-full transition-colors cursor-pointer"
@@ -809,7 +816,7 @@ export function SettingsPage() {
                 />
               </button>
             </SettingRow>
-            <SettingRow label="Speak replies automatically" description="Read every assistant reply aloud as soon as it finishes">
+            <SettingRow label={t("Автоматически озвучивать ответы", "Speak replies automatically")} description={t("Читать каждый ответ после завершения генерации", "Read every assistant reply aloud as soon as it finishes")}>
               <button
                 onClick={() => { updateSettings({ voiceAutoplay: !settings.voiceAutoplay }); showSaved(); }}
                 disabled={!settings.voiceOutputEnabled}
@@ -829,7 +836,7 @@ export function SettingsPage() {
                 />
               </button>
             </SettingRow>
-            <SettingRow label="Voice" description="Backend and voice used for spoken replies">
+            <SettingRow label={t("Голос", "Voice")} description={t("Движок и голос для чтения ответов", "Backend and voice used for spoken replies")}>
               <div className="flex items-center gap-2">
                 <span
                   className="w-2 h-2 rounded-full"
@@ -838,13 +845,13 @@ export function SettingsPage() {
                   }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {ttsBackend === null ? 'Checking...'
+                  {ttsBackend === null ? CHECKING
                     : ttsBackend.available ? `${ttsBackend.backend}${ttsBackend.voice_id ? ` / ${ttsBackend.voice_id}` : ''}`
-                    : 'Not configured'}
+                    : NOT_CONFIGURED}
                 </span>
               </div>
             </SettingRow>
-            <SettingRow label="Backend status" description="Requires Whisper, Deepgram, or another speech backend">
+            <SettingRow label={t("Распознавание речи", "Backend status")} description={t("Требуется Whisper, Deepgram или другой движок распознавания", "Requires Whisper, Deepgram, or another speech backend")}>
               <div className="flex items-center gap-2">
                 <span
                   className="w-2 h-2 rounded-full"
@@ -855,23 +862,24 @@ export function SettingsPage() {
                   }}
                 />
                 <span className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-                  {speechBackendAvailable === null ? 'Checking...'
-                    : speechBackendAvailable ? 'Available'
-                    : 'Not configured'}
+                  {speechBackendAvailable === null ? CHECKING
+                    : speechBackendAvailable ? t('Доступно', 'Available')
+                    : NOT_CONFIGURED}
                 </span>
               </div>
             </SettingRow>
             {!speechBackendAvailable && speechBackendAvailable !== null && (
               <div className="text-xs mt-2 px-1" style={{ color: 'var(--color-text-tertiary)' }}>
-                Set up a speech backend to use voice input.
-                See the <a href="https://open-jarvis.github.io/OpenJarvis/user-guide/tools/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>documentation</a> for details.
+                {t('Для диктовки настройте распознавание речи. ', 'Set up a speech backend to use voice input. See the ')}
+                <a href="https://open-jarvis.github.io/OpenJarvis/user-guide/tools/" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--color-accent)' }}>{t('Документация', 'documentation')}</a>
+                {t('.', ' for details.')}
               </div>
             )}
           </Section>
 
           {/* Data */}
-          <Section title="Data">
-            <SettingRow label="Conversations" description={`${conversations.length} stored locally`}>
+          <Section title={t("Данные", "Data")}>
+            <SettingRow label={t('Чаты', 'Conversations')} description={t(`На этом компьютере — ${conversations.length}`, `${conversations.length} stored locally`)}>
               <div className="flex gap-2">
                 <button
                   onClick={handleExport}
@@ -880,7 +888,7 @@ export function SettingsPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--color-bg-secondary)')}
                 >
-                  <Download size={12} /> Export
+                  <Download size={12} /> {t('Экспорт', 'Export')}
                 </button>
                 <button
                   onClick={handleImport}
@@ -889,11 +897,11 @@ export function SettingsPage() {
                   onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-tertiary)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--color-bg-secondary)')}
                 >
-                  <Upload size={12} /> Import
+                  <Upload size={12} /> {t('Импорт', 'Import')}
                 </button>
               </div>
             </SettingRow>
-            <SettingRow label="Clear all data" description="Permanently delete all conversations">
+            <SettingRow label={t("Удалить данные", "Clear all data")} description={t("Удалить все чаты без возможности восстановления", "Permanently delete all conversations")}>
               <button
                 onClick={handleClear}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
@@ -905,19 +913,20 @@ export function SettingsPage() {
                 onMouseEnter={(e) => { if (!confirmClear) e.currentTarget.style.background = 'rgba(220,38,38,0.1)'; }}
                 onMouseLeave={(e) => { if (!confirmClear) e.currentTarget.style.background = 'transparent'; }}
               >
-                <Trash2 size={12} /> {confirmClear ? 'Click again to confirm' : 'Clear'}
+                <Trash2 size={12} /> {confirmClear ? t('Нажмите ещё раз для подтверждения', 'Click again to confirm') : t('Очистить', 'Clear')}
               </button>
             </SettingRow>
           </Section>
 
           {/* About */}
-          <Section title="About">
+          <Section title={t("О программе", "About")}>
             <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <p className="mb-2">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis Codex</span> — A fork of OpenJarvis for on-device AI.
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis Codex</span>
+                {t(' — сборка OpenJarvis для запуска моделей на своём компьютере.', ' — A fork of OpenJarvis for on-device AI.')}
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                OpenJarvis is part of Intelligence Per Watt, a research initiative at Stanford SAIL.
+                {t('OpenJarvis создан в рамках исследовательской инициативы Intelligence Per Watt в Stanford SAIL.', 'OpenJarvis is part of Intelligence Per Watt, a research initiative at Stanford SAIL.')}
               </p>
               <div className="flex gap-3 mt-3 text-xs">
                 <a
@@ -926,7 +935,7 @@ export function SettingsPage() {
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
                 >
-                  Project site
+                  {t('Сайт проекта', 'Project site')}
                 </a>
                 <a
                   href="https://open-jarvis.github.io/OpenJarvis/"
@@ -934,7 +943,7 @@ export function SettingsPage() {
                   rel="noopener noreferrer"
                   style={{ color: 'var(--color-accent)' }}
                 >
-                  Documentation
+                  {t('Документация', 'Documentation')}
                 </a>
               </div>
             </div>
