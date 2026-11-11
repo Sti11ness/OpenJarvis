@@ -1,3 +1,4 @@
+// Modified in the Codex onboarding fork.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Palette,
@@ -16,7 +17,6 @@ import {
   Key,
   Search,
   Brain,
-  RefreshCw,
 } from 'lucide-react';
 import { useAppStore, type ThemeMode } from '../lib/store';
 import {
@@ -35,7 +35,6 @@ import {
   type InferenceSource,
   type MemoryStats,
 } from '../lib/api';
-import { isAutoUpdateDisabled, setAutoUpdateDisabled } from '../components/Desktop/UpdateChecker';
 
 const CLOUD_KEY_STATUS_CHANGED = 'openjarvis-cloud-key-status-changed';
 
@@ -295,27 +294,6 @@ export function SettingsPage() {
   const [ttsBackend, setTtsBackend] = useState<{ available: boolean; backend?: string; voice_id?: string } | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(() => !isAutoUpdateDisabled());
-  const [updateCheckState, setUpdateCheckState] = useState<'idle' | 'checking' | 'available' | 'latest'>('idle');
-
-  const handleAutoUpdateToggle = useCallback((enabled: boolean) => {
-    setAutoUpdateEnabled(enabled);
-    setAutoUpdateDisabled(!enabled);
-  }, []);
-
-  const handleCheckNow = useCallback(async () => {
-    if (!(window as any).__TAURI_INTERNALS__) return;
-    setUpdateCheckState('checking');
-    try {
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const update = await check();
-      setUpdateCheckState(update ? 'available' : 'latest');
-      setTimeout(() => setUpdateCheckState('idle'), 4000);
-    } catch {
-      setUpdateCheckState('idle');
-    }
-  }, []);
-
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus>({ kind: 'loading' });
   const memoryRequestId = useRef(0);
   const [memoryEnabled, setMemoryEnabled] = useState(() => {
@@ -335,6 +313,7 @@ export function SettingsPage() {
   });
 
   const [srcKind, setSrcKind] = useState<InferenceSource['kind']>('ollama');
+  const [configuredNativeSource, setConfiguredNativeSource] = useState<'codex' | 'openai' | null>(null);
   const [customHost, setCustomHost] = useState('http://localhost:1234/v1');
   const [customModel, setCustomModel] = useState('');
   const [customEngine, setCustomEngine] = useState('lmstudio');
@@ -344,6 +323,10 @@ export function SettingsPage() {
   useEffect(() => {
     getInferenceSource().then((s) => {
       setSrcKind(s.kind);
+      if (s.kind === 'codex' || s.kind === 'openai') {
+        setConfiguredNativeSource(s.kind);
+        return;
+      }
       if (s.host) setCustomHost(s.host);
       if (s.model) setCustomModel(s.model);
       if (s.engine) setCustomEngine(s.engine);
@@ -351,12 +334,14 @@ export function SettingsPage() {
   }, []);
 
   const saveSource = useCallback(async () => {
+    if (srcKind !== 'custom' && srcKind !== 'ollama') return;
     try {
       if (srcKind === 'custom') {
         await setInferenceSource({ kind: 'custom', host: customHost, model: customModel, engine: customEngine, apiKey: customKey || undefined });
       } else {
         await setInferenceSource({ kind: 'ollama' });
       }
+      setConfiguredNativeSource(null);
       setSrcMsg('Saved — restart the app to apply.');
     } catch (e: any) {
       setSrcMsg(e?.message ?? 'Failed to save.');
@@ -573,6 +558,11 @@ export function SettingsPage() {
               >
                 <option value="ollama">Bundled Ollama (default)</option>
                 <option value="custom">Custom OpenAI-compatible server</option>
+                {configuredNativeSource && (
+                  <option value={configuredNativeSource}>
+                    {configuredNativeSource === 'codex' ? 'Codex via ChatGPT' : 'OpenAI API key'}
+                  </option>
+                )}
               </select>
             </SettingRow>
             {srcKind === 'custom' && (
@@ -607,7 +597,8 @@ export function SettingsPage() {
             )}
             <SettingRow label="" description={srcMsg}>
               <button onClick={saveSource}
-                className="text-sm px-3 py-1.5 rounded-lg outline-none cursor-pointer"
+                disabled={srcKind === 'codex' || srcKind === 'openai'}
+                className="text-sm px-3 py-1.5 rounded-lg outline-none cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ background: 'var(--color-accent, var(--color-bg-tertiary))', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}>
                 Save inference source
               </button>
@@ -919,47 +910,14 @@ export function SettingsPage() {
             </SettingRow>
           </Section>
 
-          {/* Updates */}
-          <Section title="Updates">
-            <SettingRow label="Auto-update" description="Check for new desktop builds automatically every 30 minutes">
-              <button
-                onClick={() => handleAutoUpdateToggle(!autoUpdateEnabled)}
-                className="relative inline-flex h-5 w-9 items-center rounded-full transition-colors"
-                style={{ background: autoUpdateEnabled ? 'var(--color-accent)' : 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)' }}
-              >
-                <span
-                  className="inline-block h-3.5 w-3.5 rounded-full transition-transform"
-                  style={{
-                    background: 'white',
-                    transform: autoUpdateEnabled ? 'translateX(18px)' : 'translateX(2px)',
-                  }}
-                />
-              </button>
-            </SettingRow>
-            <SettingRow label="Check for updates" description="Manually check for a new version right now">
-              <button
-                onClick={handleCheckNow}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
-                style={{ background: 'var(--color-bg-tertiary)', border: '1px solid var(--color-border)', color: 'var(--color-text)', cursor: 'pointer' }}
-                disabled={updateCheckState === 'checking'}
-              >
-                <RefreshCw size={12} className={updateCheckState === 'checking' ? 'animate-spin' : ''} />
-                {updateCheckState === 'checking' && 'Checking...'}
-                {updateCheckState === 'available' && 'Update available — see banner above'}
-                {updateCheckState === 'latest' && 'Already up to date'}
-                {updateCheckState === 'idle' && 'Check now'}
-              </button>
-            </SettingRow>
-          </Section>
-
           {/* About */}
           <Section title="About">
             <div className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
               <p className="mb-2">
-                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis</span> — Programming abstractions for on-device AI.
+                <span className="font-semibold" style={{ color: 'var(--color-text)' }}>OpenJarvis Codex</span> — A fork of OpenJarvis for on-device AI.
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-tertiary)' }}>
-                Part of Intelligence Per Watt, a research initiative at Stanford SAIL.
+                OpenJarvis is part of Intelligence Per Watt, a research initiative at Stanford SAIL.
               </p>
               <div className="flex gap-3 mt-3 text-xs">
                 <a

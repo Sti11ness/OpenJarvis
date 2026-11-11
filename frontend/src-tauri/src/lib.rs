@@ -1,3 +1,4 @@
+// Modified in the Codex onboarding fork.
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
@@ -7,7 +8,11 @@ use tauri_plugin_autostart::MacosLauncher;
 use tokio::sync::Mutex;
 
 const OLLAMA_PORT: u16 = 11434;
-const JARVIS_PORT: u16 = 8000;
+const JARVIS_PORT: u16 = 8147;
+const CODEX_ENGINE: &str = "codex_app_server";
+const CODEX_MODEL: &str = "jarvis-codex";
+const OPENAI_ENGINE: &str = "cloud";
+const OPENAI_KEY: &str = "OPENAI_API_KEY";
 #[cfg(not(all(target_os = "windows", target_arch = "aarch64")))]
 const DESKTOP_UV_SYNC_COMMAND: &str =
     "uv sync --extra desktop --extra inference-cloud --extra inference-google --group desktop-native";
@@ -114,7 +119,7 @@ struct BootPlan {
     model_to_pull: Option<String>,
     /// Optional `(engine_key, bare_host)` override for a custom endpoint,
     /// e.g. `("lmstudio", "http://localhost:1234")`. Written into
-    /// ~/.openjarvis/config.toml so `jarvis serve` picks it up.
+    /// the fork's config.toml so `jarvis serve` picks it up.
     engine_host: Option<(String, String)>,
     /// Args appended after `uv run jarvis serve --port <port>`.
     serve_args: Vec<String>,
@@ -147,6 +152,12 @@ fn boot_plan(cfg: &InferenceConfig, ram_gb: f64) -> BootPlan {
                 ],
             }
         }
+        SourceKind::Codex => api_boot_plan(CODEX_ENGINE.into(), CODEX_MODEL.into(), None),
+        SourceKind::OpenAi => api_boot_plan(
+            OPENAI_ENGINE.into(),
+            cfg.model.clone().unwrap_or_default(),
+            None,
+        ),
         SourceKind::Custom => {
             let engine = cfg
                 .engine
@@ -164,20 +175,24 @@ fn boot_plan(cfg: &InferenceConfig, ram_gb: f64) -> BootPlan {
             // surfaces a clear error then (there is no universal default model
             // for an arbitrary endpoint).
             let model = cfg.model.clone().unwrap_or_default();
-            BootPlan {
-                launch_ollama: false,
-                model_to_pull: None,
-                engine_host,
-                serve_args: vec![
-                    "--engine".into(),
-                    engine,
-                    "--model".into(),
-                    model,
-                    "--agent".into(),
-                    "simple".into(),
-                ],
-            }
+            api_boot_plan(engine, model, engine_host)
         }
+    }
+}
+
+fn api_boot_plan(engine: String, model: String, engine_host: Option<(String, String)>) -> BootPlan {
+    BootPlan {
+        launch_ollama: false,
+        model_to_pull: None,
+        engine_host,
+        serve_args: vec![
+            "--engine".into(),
+            engine,
+            "--model".into(),
+            model,
+            "--agent".into(),
+            "simple".into(),
+        ],
     }
 }
 
@@ -186,6 +201,13 @@ fn home_dir() -> String {
     std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_default()
+}
+
+fn openjarvis_home() -> std::path::PathBuf {
+    std::env::var_os("OPENJARVIS_HOME")
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(home_dir()).join(".openjarvis-codex"))
 }
 
 /// Resolve full path to a binary by checking common locations.
@@ -282,6 +304,92 @@ fn resolve_bin(name: &str) -> String {
     }
 
     name.to_string()
+}
+
+fn codex_executable() -> Option<std::path::PathBuf> {
+    if let Some(value) = std::env::var_os("OPENJARVIS_CODEX_EXECUTABLE") {
+        let path = std::path::PathBuf::from(value);
+        return path.is_file().then_some(path);
+    }
+    let resolved = std::path::PathBuf::from(resolve_bin("codex"));
+    if resolved.is_file() {
+        return Some(resolved);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let local_app_data = std::env::var_os("LOCALAPPDATA")?;
+        let bin = std::path::PathBuf::from(local_app_data).join("OpenAI/Codex/bin");
+        return std::fs::read_dir(bin)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("codex.exe"))
+            .filter(|path| path.is_file())
+            .max_by_key(|path| path.metadata().and_then(|data| data.modified()).ok());
+    }
+    #[cfg(not(target_os = "windows"))]
+    None
+}
+
+fn codex_auth_command(executable: &std::path::Path) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(executable);
+    cmd.kill_on_drop(true)
+        .stdin(std::process::Stdio::null())
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("CODEX_API_KEY");
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    cmd
+}
+
+fn is_chatgpt_login(output: &std::process::Output) -> bool {
+    output.status.success()
+        && [&output.stdout, &output.stderr].iter().any(|stream| {
+            String::from_utf8_lossy(stream)
+                .lines()
+                .any(|line| line.trim().eq_ignore_ascii_case("Logged in using ChatGPT"))
+        })
+}
+
+async fn codex_chatgpt_status(executable: &std::path::Path) -> Result<bool, String> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(15),
+        codex_auth_command(executable)
+            .args(["login", "status"])
+            .output(),
+    )
+    .await
+    .map_err(|_| "Codex did not report its sign-in status in time.".to_string())?
+    .map_err(|error| format!("Could not check Codex sign-in: {error}"))?;
+    Ok(is_chatgpt_login(&output))
+}
+
+#[tauri::command]
+async fn get_codex_login_status() -> Result<bool, String> {
+    let Some(executable) = codex_executable() else {
+        return Ok(false);
+    };
+    codex_chatgpt_status(&executable).await
+}
+
+#[tauri::command]
+async fn login_to_codex() -> Result<bool, String> {
+    static LOGIN_IN_PROGRESS: Mutex<()> = Mutex::const_new(());
+    let _login = LOGIN_IN_PROGRESS
+        .try_lock()
+        .map_err(|_| "A Codex sign-in is already in progress.".to_string())?;
+    let executable = codex_executable()
+        .ok_or_else(|| "Could not find Codex. Install the Codex CLI and try again.".to_string())?;
+    let output = tokio::time::timeout(
+        Duration::from_secs(300),
+        codex_auth_command(&executable).arg("login").output(),
+    )
+    .await
+    .map_err(|_| "The Codex browser sign-in timed out.".to_string())?
+    .map_err(|error| format!("Could not start Codex sign-in: {error}"))?;
+    if !output.status.success() {
+        return Err("Codex sign-in failed. Try signing in again.".into());
+    }
+    codex_chatgpt_status(&executable).await
 }
 
 /// Find the OpenJarvis project root (contains pyproject.toml).
@@ -492,8 +600,7 @@ struct SetupStatus {
     server_ready: bool,
     model_ready: bool,
     error: Option<String>,
-    /// "unconfigured" | "ollama" | "custom" — lets the setup UI choose
-    /// between the consent screen and source-aware progress labels.
+    /// Lets setup choose between consent and source-aware progress labels.
     source: String,
     /// A fresh desktop install must collect an explicit source choice before
     /// any inference process is allowed to start.
@@ -520,11 +627,7 @@ impl SetupStatus {
         Self {
             phase: "starting".into(),
             detail: "Initializing...".into(),
-            source: match cfg.kind {
-                SourceKind::Ollama => "ollama",
-                SourceKind::Custom => "custom",
-            }
-            .into(),
+            source: cfg.kind.id().into(),
             requires_source: false,
             ..Self::default()
         }
@@ -915,11 +1018,8 @@ fn rust_toolchain_install_hint() -> &'static str {
 /// Windows ARM64 runs the current Python dependency stack under x64 emulation:
 /// the locked numpy/pyarrow and speech wheels do not support win_arm64.
 /// The Tauri shell and bundled Ollama remain native ARM64 processes.
-#[cfg_attr(
-    not(all(target_os = "windows", target_arch = "aarch64")),
-    allow(unused_variables)
-)]
 fn prepare_backend_python(cmd: &mut tokio::process::Command) {
+    cmd.env("OPENJARVIS_HOME", openjarvis_home());
     #[cfg(all(target_os = "windows", target_arch = "aarch64"))]
     {
         cmd.env("UV_PYTHON", "cpython-3.12-windows-x86_64-none");
@@ -1063,12 +1163,29 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
     {
         let mut s = status.lock().await;
         *s = SetupStatus::starting(&cfg);
-        s.source = match cfg.kind {
-            SourceKind::Ollama => "ollama",
-            SourceKind::Custom => "custom",
-        }
-        .into();
     }
+
+    let codex_bin = if cfg.kind == SourceKind::Codex {
+        let Some(executable) = codex_executable() else {
+            status.lock().await.error =
+                Some("Could not find Codex. Install the Codex CLI and try again.".into());
+            return;
+        };
+        match codex_chatgpt_status(&executable).await {
+            Ok(true) => Some(executable),
+            Ok(false) => {
+                status.lock().await.error =
+                    Some("Sign in to Codex with ChatGPT before continuing.".into());
+                return;
+            }
+            Err(error) => {
+                status.lock().await.error = Some(error);
+                return;
+            }
+        }
+    } else {
+        None
+    };
 
     // For the Ollama path, model resolution may fall back to FALLBACK_MODEL; we
     // record what is actually available here so the serve command below uses
@@ -1197,7 +1314,7 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
             s.model_ready = true;
             s.detail = "Model ready.".into();
         }
-    } else {
+    } else if cfg.kind == SourceKind::Custom {
         // Custom OpenAI-compatible endpoint: never start Ollama, never download.
         let host = plan
             .engine_host
@@ -1223,7 +1340,7 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
             return;
         }
         // Point `jarvis serve` at the user's endpoint by writing the engine
-        // host into ~/.openjarvis/config.toml (the env var alone is shadowed by
+        // host into the fork's config.toml (the env var alone is shadowed by
         // the engine's non-empty default host in the Python layer).
         if let Some((engine, host)) = &plan.engine_host {
             if let Err(e) = set_engine_host_in_config(engine, host) {
@@ -1238,6 +1355,10 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
             s.model_ready = true;
             s.detail = "Connected to custom endpoint.".into();
         }
+    } else {
+        let mut s = status.lock().await;
+        s.ollama_ready = true;
+        s.model_ready = true;
     }
 
     // Phase 3: Start jarvis serve
@@ -1280,6 +1401,17 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
     }
 
     let mut project_root = find_project_root();
+    if cfg.kind == SourceKind::Codex
+        && !project_root.as_ref().is_some_and(|root| {
+            root.join("src/openjarvis/engine/codex_app_server.py")
+                .is_file()
+        })
+    {
+        status.lock().await.error = Some(
+            "Set OPENJARVIS_ROOT to the OpenJarvis Codex checkout to use the Codex engine.".into(),
+        );
+        return;
+    }
 
     if project_root.is_none() {
         // Auto-clone on first launch
@@ -1610,6 +1742,9 @@ async fn boot_backend(backend: SharedBackend, status: SharedStatus) {
     // additions aren't accidentally stripped.
     prepare_subprocess_for_appimage(&mut cmd);
     prepare_backend_python(&mut cmd);
+    if let Some(executable) = codex_bin {
+        cmd.env("OPENJARVIS_CODEX_EXECUTABLE", executable);
+    }
 
     // Inject cloud API keys from secure desktop storage.
     for (key, value) in cloud_keys_for_inference(&cfg) {
@@ -1977,6 +2112,7 @@ async fn run_jarvis_command(args: Vec<String>) -> Result<String, String> {
 
     let mut cmd = tokio::process::Command::new(&uv_bin);
     cmd.args(&cmd_args);
+    prepare_backend_python(&mut cmd);
     // Run from the project root so `uv run jarvis` resolves the OpenJarvis
     // project regardless of the app's launch cwd. In a packaged install the
     // cwd isn't the checkout, so without this `jarvis` isn't found and the
@@ -2150,7 +2286,7 @@ async fn submit_savings(
 // Cloud API key management
 // ---------------------------------------------------------------------------
 
-const SECURE_KEY_SERVICE: &str = "OpenJarvis Cloud Keys";
+const SECURE_KEY_SERVICE: &str = "OpenJarvis Codex Cloud Keys";
 // A first-run custom credential is kept in its own secure-storage slot until
 // the managed backend has passed every readiness gate.  In particular, do not
 // overwrite an existing <ENGINE>_API_KEY while setup can still be cancelled.
@@ -2168,10 +2304,7 @@ const MANAGED_CLOUD_KEY_NAMES: &[&str] = &[
 
 /// Legacy path used by older desktop builds. New saves never write here.
 fn legacy_cloud_keys_path() -> std::path::PathBuf {
-    let home = home_dir();
-    std::path::PathBuf::from(home)
-        .join(".openjarvis")
-        .join("cloud-keys.env")
+    openjarvis_home().join("cloud-keys.env")
 }
 
 fn validate_cloud_key_name(key_name: &str) -> Result<(), String> {
@@ -2453,9 +2586,7 @@ async fn get_inference_source() -> Result<InferenceConfig, String> {
     Ok(read_inference_config())
 }
 
-/// Persist the chosen inference source. `host` is normalized to a bare base
-/// URL. For custom endpoints, an optional API key is stored in secure desktop
-/// storage under `<ENGINE>_API_KEY`. Applies on next app launch.
+/// Persist the chosen source and stage any credential in secure storage.
 #[tauri::command]
 async fn set_inference_source(
     kind: String,
@@ -2468,9 +2599,11 @@ async fn set_inference_source(
     let kind = match kind.as_str() {
         "ollama" => SourceKind::Ollama,
         "custom" => SourceKind::Custom,
+        "codex" => SourceKind::Codex,
+        "openai" => SourceKind::OpenAi,
         other => return Err(format!("Unknown inference source kind: {:?}", other)),
     };
-    let cfg = InferenceConfig {
+    let mut cfg = InferenceConfig {
         kind,
         confirmed: !pending.unwrap_or(false),
         model: model.filter(|m| !m.is_empty()),
@@ -2480,16 +2613,34 @@ async fn set_inference_source(
     let api_key = api_key
         .map(|key| key.trim().to_string())
         .filter(|key| !key.is_empty());
-    if let SourceKind::Custom = cfg.kind {
-        if cfg.host.is_none() {
-            return Err("A server URL is required for a custom endpoint.".into());
+    let store = SystemInferenceCredentialStore;
+    match cfg.kind {
+        SourceKind::Ollama => {}
+        SourceKind::Custom => {
+            if cfg.host.is_none() {
+                return Err("A server URL is required for a custom endpoint.".into());
+            }
+            if cfg.model.is_none() {
+                return Err("A model name is required for a custom endpoint.".into());
+            }
         }
-        if cfg.model.as_deref().unwrap_or("").is_empty() {
-            return Err("A model name is required for a custom endpoint.".into());
+        SourceKind::Codex => {
+            cfg.model = Some(CODEX_MODEL.into());
+            cfg.engine = Some(CODEX_ENGINE.into());
+            cfg.host = None;
+        }
+        SourceKind::OpenAi => {
+            cfg.model = Some(normalize_openai_model(cfg.model.as_deref())?);
+            cfg.engine = Some(OPENAI_ENGINE.into());
+            cfg.host = None;
+            if api_key.is_none()
+                && (!cfg.confirmed || store.get(OPENAI_KEY)?.as_deref().is_none_or(str::is_empty))
+            {
+                return Err("An OpenAI API key is required.".into());
+            }
         }
     }
 
-    let store = SystemInferenceCredentialStore;
     if cfg.confirmed {
         persist_confirmed_inference_config(&cfg, api_key.as_deref(), &store)
     } else {
@@ -2527,7 +2678,7 @@ async fn delete_ollama_model(model_name: String) -> Result<serde_json::Value, St
 }
 
 // ---------------------------------------------------------------------------
-// Inference-source selection (~/.openjarvis/inference.json)
+// Inference-source selection (inference.json in the fork's profile)
 // ---------------------------------------------------------------------------
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -2535,6 +2686,19 @@ async fn delete_ollama_model(model_name: String) -> Result<serde_json::Value, St
 enum SourceKind {
     Ollama,
     Custom,
+    Codex,
+    OpenAi,
+}
+
+impl SourceKind {
+    fn id(self) -> &'static str {
+        match self {
+            Self::Ollama => "ollama",
+            Self::Custom => "custom",
+            Self::Codex => "codex",
+            Self::OpenAi => "openai",
+        }
+    }
 }
 
 impl Default for SourceKind {
@@ -2561,15 +2725,38 @@ struct InferenceConfig {
     engine: Option<String>,
 }
 
+impl InferenceConfig {
+    fn credential_key(&self) -> Option<String> {
+        match self.kind {
+            SourceKind::Custom => Some(engine_api_key_name(
+                self.engine.as_deref().unwrap_or(CUSTOM_FALLBACK_ENGINE),
+            )),
+            SourceKind::OpenAi => Some(OPENAI_KEY.into()),
+            SourceKind::Ollama | SourceKind::Codex => None,
+        }
+    }
+}
+
+fn normalize_openai_model(raw: Option<&str>) -> Result<String, String> {
+    let model = raw.unwrap_or("").trim();
+    let id = model.strip_prefix("openai/").unwrap_or(model);
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+    {
+        return Err("Enter an OpenAI model ID.".into());
+    }
+    Ok(format!("openai/{id}"))
+}
+
 fn legacy_config_is_confirmed() -> bool {
     true
 }
 
-/// Path to the inference-source config (~/.openjarvis/inference.json).
+/// Path to the inference-source config in the fork's profile.
 fn inference_config_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(home_dir())
-        .join(".openjarvis")
-        .join("inference.json")
+    openjarvis_home().join("inference.json")
 }
 
 fn remove_inference_config_at(path: &std::path::Path) -> Result<(), String> {
@@ -2587,12 +2774,11 @@ struct PendingInferenceCredential {
 
 impl PendingInferenceCredential {
     fn for_config(cfg: &InferenceConfig) -> Option<Self> {
-        if cfg.confirmed || !matches!(cfg.kind, SourceKind::Custom) {
+        if cfg.confirmed {
             return None;
         }
-        let engine = cfg.engine.as_deref().unwrap_or(CUSTOM_FALLBACK_ENGINE);
         Some(Self {
-            target_key: engine_api_key_name(engine),
+            target_key: cfg.credential_key()?,
         })
     }
 }
@@ -2624,9 +2810,7 @@ fn persist_confirmed_inference_config_at(
     let Some(api_key) = api_key else {
         return write_inference_config_at(cfg, path);
     };
-    let Some(target_key) = (matches!(cfg.kind, SourceKind::Custom))
-        .then(|| engine_api_key_name(cfg.engine.as_deref().unwrap_or(CUSTOM_FALLBACK_ENGINE)))
-    else {
+    let Some(target_key) = cfg.credential_key() else {
         return write_inference_config_at(cfg, path);
     };
 
@@ -2670,12 +2854,10 @@ fn stage_pending_inference_config_at(
     store
         .set(PENDING_INFERENCE_API_KEY, "")
         .map_err(|err| format!("Could not clear a pending API key: {}", err))?;
-    if matches!(cfg.kind, SourceKind::Custom) {
-        if let Some(api_key) = api_key {
-            store
-                .set(PENDING_INFERENCE_API_KEY, api_key)
-                .map_err(|err| format!("Could not stage the API key: {}", err))?;
-        }
+    if let Some(api_key) = api_key.filter(|_| cfg.credential_key().is_some()) {
+        store
+            .set(PENDING_INFERENCE_API_KEY, api_key)
+            .map_err(|err| format!("Could not stage the API key: {}", err))?;
     }
 
     if let Err(config_err) = write_inference_config_at(cfg, path) {
@@ -2891,14 +3073,12 @@ fn upsert_engine_host(existing: &str, engine: &str, host: &str) -> Result<String
     Ok(doc.to_string())
 }
 
-/// Write the custom-endpoint host into ~/.openjarvis/config.toml so
+/// Write the custom-endpoint host into the fork's config.toml so
 /// `jarvis serve` (which reads that file via load_config) points at it.
 /// The `<ENGINE>_HOST` env var is unreliable — it is shadowed by the engine's
 /// non-empty default host in the Python layer — so config.toml is the override.
 fn set_engine_host_in_config(engine: &str, host: &str) -> Result<(), String> {
-    let path = std::path::PathBuf::from(home_dir())
-        .join(".openjarvis")
-        .join("config.toml");
+    let path = openjarvis_home().join("config.toml");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -2985,9 +3165,7 @@ mod native_overlay {
     // ------------------------------------------------------------------
 
     fn conversation_path() -> std::path::PathBuf {
-        std::path::PathBuf::from(super::home_dir())
-            .join(".openjarvis")
-            .join("overlay-conversation.json")
+        super::openjarvis_home().join("overlay-conversation.json")
     }
 
     pub fn load_conversation() -> String {
@@ -3365,7 +3543,6 @@ pub fn run() {
             MacosLauncher::LaunchAgent,
             Some(vec!["--hidden"]),
         ))
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -3379,7 +3556,7 @@ pub fn run() {
             let health = MenuItemBuilder::with_id("health", "Health: starting...")
                 .enabled(false)
                 .build(app)?;
-            let quit = MenuItemBuilder::with_id("quit", "Quit OpenJarvis").build(app)?;
+            let quit = MenuItemBuilder::with_id("quit", "Quit OpenJarvis Codex").build(app)?;
 
             let menu = MenuBuilder::new(app)
                 .item(&show)
@@ -3391,7 +3568,7 @@ pub fn run() {
 
             let _tray = TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().unwrap().clone())
-                .tooltip("OpenJarvis")
+                .tooltip("OpenJarvis Codex")
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "show" => {
@@ -3447,6 +3624,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_setup_status,
             get_api_base,
+            get_codex_login_status,
+            login_to_codex,
             start_backend,
             stop_backend,
             reset_inference_source,
@@ -3973,6 +4152,83 @@ mod tests {
         };
         let plan = boot_plan(&cfg, 16.0);
         assert!(plan.engine_host.is_none());
+    }
+
+    #[test]
+    fn native_codex_and_openai_bypass_local_inference_setup() {
+        for (kind, engine, model) in [
+            (SourceKind::Codex, super::CODEX_ENGINE, super::CODEX_MODEL),
+            (SourceKind::OpenAi, super::OPENAI_ENGINE, "openai/gpt-test"),
+        ] {
+            let cfg = InferenceConfig {
+                kind,
+                model: Some(model.into()),
+                ..Default::default()
+            };
+            let plan = boot_plan(&cfg, 16.0);
+            assert!(!plan.launch_ollama);
+            assert!(plan.model_to_pull.is_none());
+            assert!(plan.engine_host.is_none());
+            assert!(plan
+                .serve_args
+                .windows(2)
+                .any(|w| w == ["--engine", engine]));
+            assert!(plan.serve_args.windows(2).any(|w| w == ["--model", model]));
+            assert_eq!(super::SetupStatus::starting(&cfg).source, kind.id());
+        }
+    }
+
+    #[test]
+    fn openai_model_ids_are_routed_to_the_openai_provider() {
+        use super::normalize_openai_model;
+        for input in ["gpt-test", " openai/gpt-test "] {
+            assert_eq!(
+                normalize_openai_model(Some(input)).unwrap(),
+                "openai/gpt-test"
+            );
+        }
+        assert_eq!(
+            normalize_openai_model(Some("ft:gpt-test:team::model")).unwrap(),
+            "openai/ft:gpt-test:team::model"
+        );
+        for input in ["", "openai/", "gpt test", "anthropic/gpt-test"] {
+            assert!(normalize_openai_model(Some(input)).is_err());
+        }
+    }
+
+    #[test]
+    fn pending_openai_key_is_promoted_without_entering_inference_json() {
+        let root = unique_test_root("native-openai-key");
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("inference.json");
+        let store = std::sync::Arc::new(MemoryCredentialStore::default());
+        store.put(super::OPENAI_KEY, "existing-key");
+        let mut cfg = InferenceConfig {
+            kind: SourceKind::OpenAi,
+            confirmed: false,
+            model: Some("openai/gpt-test".into()),
+            engine: Some(super::OPENAI_ENGINE.into()),
+            ..Default::default()
+        };
+        stage_pending_inference_config_at(&cfg, Some("new-key"), store.as_ref(), &path).unwrap();
+        assert_eq!(
+            store.value(super::OPENAI_KEY).as_deref(),
+            Some("existing-key")
+        );
+        assert_eq!(
+            store.value(PENDING_INFERENCE_API_KEY).as_deref(),
+            Some("new-key")
+        );
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("new-key"));
+
+        let mut rollback =
+            PendingInferenceRollback::at_path_with_store(&cfg, path.clone(), store.clone());
+        rollback.confirm(&mut cfg).unwrap();
+        assert!(cfg.confirmed);
+        assert_eq!(store.value(super::OPENAI_KEY).as_deref(), Some("new-key"));
+        assert_eq!(store.value(PENDING_INFERENCE_API_KEY), None);
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("new-key"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -1,3 +1,28 @@
+## Codex onboarding fork
+
+This unofficial fork of [OpenJarvis](https://github.com/open-jarvis/OpenJarvis) is based on Desktop 1.0.5 and distributed under the upstream [Apache 2.0 license](LICENSE).
+
+The first-run screen offers two new inference sources.
+
+- **Codex via ChatGPT** uses a locally installed Codex CLI. It reuses the current ChatGPT sign-in or opens the official sign-in flow when requested. OpenJarvis communicates with Codex App Server over stdio. This engine returns text and supports streaming.
+- **OpenAI API key** sends requests to the OpenAI API with a user-supplied key and model ID. The desktop app stores the key in the system credential store after setup. OpenAI bills this mode through the API account associated with that key.
+
+The fork also changes the desktop identity, profile and API port so it can run alongside stock OpenJarvis. Its profile defaults to `.openjarvis-codex` and its backend listens on loopback port 8147. The fork retains the upstream local and OpenAI-compatible server options.
+
+### Build the desktop fork
+
+Install the upstream [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/), Python, uv, Node.js 22.22 or newer and npm 11.19 or newer within the npm 11 series. Run the build commands from this checkout.
+
+```sh
+cd frontend
+npm ci
+npm run tauri build -- --no-bundle
+```
+
+Keep the source checkout available at runtime. Set `OPENJARVIS_ROOT` to this checkout when starting the executable if the desktop app cannot locate it. Install [Codex CLI](https://learn.chatgpt.com/docs/cli) to use the ChatGPT mode.
+
+This branch modifies the inference setup, desktop launch configuration and engine registration. The original project and its notices are retained below.
+
 <div align="center">
   <img alt="OpenJarvis" src="assets/OpenJarvis_Horizontal_Logo.png" width="400">
 

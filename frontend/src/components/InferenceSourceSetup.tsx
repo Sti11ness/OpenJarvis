@@ -1,14 +1,18 @@
-import { useReducer, useState, type FormEvent } from 'react';
-import { ArrowLeft, Cpu, Download, Loader2, Server, ShieldCheck } from 'lucide-react';
+// Modified in the Codex onboarding fork.
+import { useEffect, useReducer, useState, type FormEvent } from 'react';
+import { ArrowLeft, Cpu, Download, KeyRound, Loader2, LogIn, Server, ShieldCheck } from 'lucide-react';
 import {
+  getCodexLoginStatus,
+  loginToCodex,
   resetInferenceSource,
   stageInferenceSource,
   startBackend,
   type InferenceSource,
 } from '../lib/api';
 
-export type InferenceSetupStep = 'choose' | 'ollama' | 'custom';
-export type InferenceSetupAction = 'choose_ollama' | 'choose_custom' | 'back';
+type InferenceSourceChoice = InferenceSource['kind'];
+export type InferenceSetupStep = 'choose' | InferenceSourceChoice;
+export type InferenceSetupAction = `choose_${InferenceSourceChoice}` | 'back';
 export type InferenceSourceSubmission = InferenceSource & { apiKey?: string };
 
 /** Pure navigation state: merely inspecting a source can never start setup. */
@@ -21,6 +25,10 @@ export function inferenceSetupReducer(
       return 'ollama';
     case 'choose_custom':
       return 'custom';
+    case 'choose_codex':
+      return 'codex';
+    case 'choose_openai':
+      return 'openai';
     case 'back':
       return 'choose';
     default:
@@ -53,8 +61,8 @@ export async function persistAndStartInferenceSource(
 
 function SetupFrame({ children }: { children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 flex items-center justify-center" style={{ background: 'var(--color-bg)' }}>
-      <div className="w-full max-w-lg px-6">
+    <div className="fixed inset-0 flex justify-center overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
+      <div className="w-full max-w-lg my-auto px-6 py-8">
         <div className="text-center mb-8">
           <div
             className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
@@ -83,43 +91,46 @@ function SetupFrame({ children }: { children: React.ReactNode }) {
 export function InferenceSourceChooser({
   onChoose,
 }: {
-  onChoose: (source: 'ollama' | 'custom') => void;
+  onChoose: (source: InferenceSourceChoice) => void;
 }) {
+  const sources = [
+    { kind: 'codex', icon: LogIn, title: 'Codex via ChatGPT', detail: 'Use your ChatGPT account through the Codex app server.' },
+    { kind: 'openai', icon: KeyRound, title: 'OpenAI API key', detail: 'Use a model and API key from your OpenAI project.' },
+    {
+      kind: 'ollama',
+      icon: Cpu,
+      title: 'Local Ollama',
+      detail: 'Run models on this computer. Requires a separate confirmation before Ollama starts or a model downloads.',
+    },
+    {
+      kind: 'custom',
+      icon: Server,
+      title: 'OpenAI-compatible server',
+      detail: 'Connect to LM Studio, vLLM, SGLang, llama.cpp, MLX, or another compatible endpoint.',
+    },
+  ] as const;
   return (
     <SetupFrame>
       <div className="flex flex-col gap-3">
-        <button
-          type="button"
-          onClick={() => onChoose('ollama')}
-          className="flex items-start gap-4 p-4 rounded-xl text-left transition-all cursor-pointer"
-          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
-        >
-          <Cpu size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
-          <span>
-            <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-              Local Ollama
+        {sources.map(({ kind, icon: Icon, title, detail }) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => onChoose(kind)}
+            className="flex items-start gap-4 p-4 rounded-xl text-left transition-all cursor-pointer"
+            style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+          >
+            <Icon size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
+            <span>
+              <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                {title}
+              </span>
+              <span className="block text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
+                {detail}
+              </span>
             </span>
-            <span className="block text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Run models on this computer. Requires a separate confirmation before Ollama starts or a model downloads.
-            </span>
-          </span>
-        </button>
-        <button
-          type="button"
-          onClick={() => onChoose('custom')}
-          className="flex items-start gap-4 p-4 rounded-xl text-left transition-all cursor-pointer"
-          style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
-        >
-          <Server size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
-          <span>
-            <span className="block text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
-              OpenAI-compatible server
-            </span>
-            <span className="block text-xs mt-1" style={{ color: 'var(--color-text-secondary)' }}>
-              Connect to LM Studio, vLLM, SGLang, llama.cpp, MLX, or another compatible endpoint. Ollama stays off.
-            </span>
-          </span>
-        </button>
+          </button>
+        ))}
       </div>
     </SetupFrame>
   );
@@ -227,6 +238,151 @@ function SetupError({ message }: { message: string }) {
   );
 }
 
+type CodexLoginState = 'checking' | 'signed-out' | 'signing-in' | 'signed-in';
+
+export function CodexAccountSetup({
+  status,
+  onBack,
+  onSignIn,
+  onConfirm,
+  busy = false,
+  error = '',
+}: {
+  status: CodexLoginState;
+  onBack: () => void;
+  onSignIn: () => void;
+  onConfirm: () => void;
+  busy?: boolean;
+  error?: string;
+}) {
+  const signedIn = status === 'signed-in';
+  const checking = status === 'checking';
+  const signingIn = status === 'signing-in';
+  return (
+    <SetupFrame>
+      <BackButton onClick={onBack} disabled={busy || signingIn} />
+      <div className="flex items-start gap-3 mb-5">
+        <LogIn size={22} className="shrink-0 mt-0.5" style={{ color: 'var(--color-accent)' }} />
+        <div>
+          <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+            Codex via ChatGPT
+          </h2>
+          <p role="status" className="text-sm leading-relaxed" style={{ color: 'var(--color-text-secondary)' }}>
+            {signedIn
+              ? 'Codex is signed in with ChatGPT on this computer.'
+              : checking
+                ? 'Checking your Codex sign-in...'
+                : signingIn
+                  ? 'Complete the Codex sign-in in your browser.'
+                  : 'Sign in to Codex with your ChatGPT account to continue.'}
+          </p>
+        </div>
+      </div>
+      {error && <SetupError message={error} />}
+      <button
+        type="button"
+        onClick={signedIn ? onConfirm : onSignIn}
+        disabled={busy || checking || signingIn}
+        className="w-full py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-70"
+        style={{ background: 'var(--color-accent)', color: 'white' }}
+      >
+        {(busy || checking || signingIn) && <Loader2 size={16} className="animate-spin" />}
+        {busy
+          ? 'Starting Codex...'
+          : checking
+            ? 'Checking sign-in...'
+            : signingIn
+              ? 'Signing in...'
+              : signedIn
+                ? 'Continue'
+                : 'Sign in with ChatGPT'}
+      </button>
+    </SetupFrame>
+  );
+}
+
+const FIELD_STYLE = {
+  background: 'var(--color-surface)',
+  color: 'var(--color-text)',
+  border: '1px solid var(--color-border)',
+};
+
+export function OpenAIKeySetup({
+  onBack,
+  onConfirm,
+  busy = false,
+  error = '',
+}: {
+  onBack: () => void;
+  onConfirm: (source: InferenceSourceSubmission) => void;
+  busy?: boolean;
+  error?: string;
+}) {
+  const [model, setModel] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const canSubmit = !busy && Boolean(model.trim() && apiKey.trim());
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (canSubmit) onConfirm({ kind: 'openai', model: model.trim(), apiKey: apiKey.trim() });
+  };
+
+  return (
+    <SetupFrame>
+      <BackButton onClick={onBack} disabled={busy} />
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <div>
+          <h2 className="text-base font-semibold mb-1" style={{ color: 'var(--color-text)' }}>
+            Connect to OpenAI
+          </h2>
+          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+            Enter a model ID and an API key from your OpenAI project.
+          </p>
+        </div>
+        <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          Model ID
+          <input
+            aria-label="Model ID"
+            type="text"
+            required
+            disabled={busy}
+            value={model}
+            onChange={(event) => setModel(event.target.value)}
+            autoCapitalize="none"
+            spellCheck={false}
+            className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
+            style={FIELD_STYLE}
+          />
+        </label>
+        <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          OpenAI API key
+          <input
+            aria-label="OpenAI API key"
+            type="password"
+            required
+            disabled={busy}
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            autoComplete="off"
+            className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
+            style={FIELD_STYLE}
+          />
+        </label>
+        {error && <SetupError message={error} />}
+        <button
+          type="submit"
+          disabled={!canSubmit}
+          className="w-full py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          style={{ background: 'var(--color-accent)', color: 'white' }}
+        >
+          {busy && <Loader2 size={16} className="animate-spin" />}
+          {busy ? 'Connecting...' : 'Save and connect'}
+        </button>
+      </form>
+    </SetupFrame>
+  );
+}
+
 export function CustomEndpointSetup({
   onCancel,
   onConfirm,
@@ -254,12 +410,6 @@ export function CustomEndpointSetup({
     });
   };
 
-  const fieldStyle = {
-    background: 'var(--color-surface)',
-    color: 'var(--color-text)',
-    border: '1px solid var(--color-border)',
-  };
-
   return (
     <SetupFrame>
       <BackButton onClick={onCancel} label="Cancel" disabled={busy} />
@@ -281,7 +431,7 @@ export function CustomEndpointSetup({
             value={host}
             onChange={(event) => setHost(event.target.value)}
             className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
-            style={fieldStyle}
+            style={FIELD_STYLE}
           />
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
@@ -294,7 +444,7 @@ export function CustomEndpointSetup({
             onChange={(event) => setModel(event.target.value)}
             placeholder="qwen2.5-7b-instruct"
             className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
-            style={fieldStyle}
+            style={FIELD_STYLE}
           />
         </label>
         <label className="text-xs font-medium" style={{ color: 'var(--color-text-secondary)' }}>
@@ -304,7 +454,7 @@ export function CustomEndpointSetup({
             value={engine}
             onChange={(event) => setEngine(event.target.value)}
             className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
-            style={fieldStyle}
+            style={FIELD_STYLE}
           >
             <option value="lmstudio">LM Studio</option>
             <option value="vllm">vLLM</option>
@@ -322,7 +472,7 @@ export function CustomEndpointSetup({
             onChange={(event) => setApiKey(event.target.value)}
             autoComplete="off"
             className="block w-full mt-1.5 px-3 py-2 rounded-lg text-sm outline-none"
-            style={fieldStyle}
+            style={FIELD_STYLE}
           />
         </label>
         {error && <SetupError message={error} />}
@@ -344,6 +494,41 @@ export function InferenceSourceSetup({ onStarted }: { onStarted: () => void }) {
   const [step, dispatch] = useReducer(inferenceSetupReducer, 'choose');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [codexStatus, setCodexStatus] = useState<CodexLoginState>('checking');
+
+  const navigate = (action: InferenceSetupAction) => {
+    setError('');
+    if (action === 'choose_codex') setCodexStatus('checking');
+    dispatch(action);
+  };
+
+  useEffect(() => {
+    if (step !== 'codex') return;
+    let active = true;
+    void getCodexLoginStatus()
+      .then((signedIn) => {
+        if (active) setCodexStatus(signedIn ? 'signed-in' : 'signed-out');
+      })
+      .catch((err: unknown) => {
+        if (!active) return;
+        setCodexStatus('signed-out');
+        setError(err instanceof Error ? err.message : String(err));
+      });
+    return () => { active = false; };
+  }, [step]);
+
+  const signIn = async () => {
+    setError('');
+    setCodexStatus('signing-in');
+    try {
+      const signedIn = await loginToCodex();
+      setCodexStatus(signedIn ? 'signed-in' : 'signed-out');
+      if (!signedIn) setError('Codex sign-in was not completed. Try signing in again.');
+    } catch (err) {
+      setCodexStatus('signed-out');
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const begin = async (source: InferenceSourceSubmission) => {
     setBusy(true);
@@ -352,7 +537,8 @@ export function InferenceSourceSetup({ onStarted }: { onStarted: () => void }) {
       await persistAndStartInferenceSource(source);
       onStarted();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(source.apiKey ? message.split(source.apiKey).join('[redacted]') : message);
       setBusy(false);
     }
   };
@@ -362,7 +548,7 @@ export function InferenceSourceSetup({ onStarted }: { onStarted: () => void }) {
       <OllamaConsent
         busy={busy}
         error={error}
-        onBack={() => dispatch('back')}
+        onBack={() => navigate('back')}
         onConfirm={() => void begin({ kind: 'ollama' })}
       />
     );
@@ -372,14 +558,34 @@ export function InferenceSourceSetup({ onStarted }: { onStarted: () => void }) {
       <CustomEndpointSetup
         busy={busy}
         error={error}
-        onCancel={() => dispatch('back')}
+        onCancel={() => navigate('back')}
+        onConfirm={(source) => void begin(source)}
+      />
+    );
+  }
+  if (step === 'codex') {
+    return (
+      <CodexAccountSetup
+        status={codexStatus}
+        busy={busy}
+        error={error}
+        onBack={() => navigate('back')}
+        onSignIn={() => void signIn()}
+        onConfirm={() => void begin({ kind: 'codex' })}
+      />
+    );
+  }
+  if (step === 'openai') {
+    return (
+      <OpenAIKeySetup
+        busy={busy}
+        error={error}
+        onBack={() => navigate('back')}
         onConfirm={(source) => void begin(source)}
       />
     );
   }
   return (
-    <InferenceSourceChooser
-      onChoose={(source) => dispatch(source === 'ollama' ? 'choose_ollama' : 'choose_custom')}
-    />
+    <InferenceSourceChooser onChoose={(source) => navigate(`choose_${source}`)} />
   );
 }

@@ -1,14 +1,26 @@
+// Modified in the Codex onboarding fork.
+import { invoke } from '@tauri-apps/api/core';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  CodexAccountSetup,
   CustomEndpointSetup,
   InferenceRecoveryButton,
   InferenceSourceChooser,
   OllamaConsent,
+  OpenAIKeySetup,
   inferenceSetupReducer,
   persistAndStartInferenceSource,
   type InferenceSourceSubmission,
 } from './InferenceSourceSetup';
+import { getCodexLoginStatus, loginToCodex } from '../lib/api';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+
+afterEach(() => {
+  vi.mocked(invoke).mockReset();
+  vi.unstubAllGlobals();
+});
 
 describe('first-run inference source navigation', () => {
   it('requires a second, explicit confirmation before local setup', () => {
@@ -21,13 +33,50 @@ describe('first-run inference source navigation', () => {
     expect(inferenceSetupReducer('custom', 'back')).toBe('choose');
   });
 
-  it('renders both sources without claiming either has started', () => {
+  it('renders all four sources before startup', () => {
     const html = renderToStaticMarkup(<InferenceSourceChooser onChoose={vi.fn()} />);
 
+    expect(html).toContain('Codex via ChatGPT');
+    expect(html).toContain('OpenAI API key');
     expect(html).toContain('Local Ollama');
     expect(html).toContain('OpenAI-compatible server');
     expect(html).toContain('Nothing is installed, started, or downloaded until you confirm');
     expect(html).not.toContain('Starting local setup');
+  });
+
+  it('opens separate Codex and OpenAI setup steps with a back path', () => {
+    expect(inferenceSetupReducer('choose', 'choose_codex')).toBe('codex');
+    expect(inferenceSetupReducer('codex', 'back')).toBe('choose');
+    expect(inferenceSetupReducer('choose', 'choose_openai')).toBe('openai');
+    expect(inferenceSetupReducer('openai', 'back')).toBe('choose');
+  });
+
+  it('offers sign-in for a logged-out Codex and Continue for an existing ChatGPT login', () => {
+    const callbacks = { onBack: vi.fn(), onSignIn: vi.fn(), onConfirm: vi.fn() };
+    const signedOut = renderToStaticMarkup(<CodexAccountSetup status="signed-out" {...callbacks} />);
+    const signedIn = renderToStaticMarkup(<CodexAccountSetup status="signed-in" {...callbacks} />);
+
+    expect(signedOut).toContain('Sign in with ChatGPT');
+    expect(signedIn).toContain('signed in with ChatGPT on this computer');
+    expect(signedIn).toContain('>Continue</button>');
+    expect(signedIn).not.toContain('Sign in with ChatGPT');
+  });
+
+  it('keeps the Codex action disabled while checking the current account', () => {
+    const html = renderToStaticMarkup(
+      <CodexAccountSetup status="checking" onBack={vi.fn()} onSignIn={vi.fn()} onConfirm={vi.fn()} />,
+    );
+
+    expect(html).toContain('Checking your Codex sign-in');
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*Checking sign-in/);
+  });
+
+  it('requires a model and a masked key for OpenAI setup', () => {
+    const html = renderToStaticMarkup(<OpenAIKeySetup onBack={vi.fn()} onConfirm={vi.fn()} />);
+
+    expect(html).toMatch(/aria-label="Model ID"[^>]*required/);
+    expect(html).toMatch(/aria-label="OpenAI API key"[^>]*type="password"[^>]*required/);
+    expect(html).toMatch(/type="submit"[^>]*disabled/);
   });
 
   it('discloses the model download and offers a no-op back path', () => {
@@ -71,6 +120,39 @@ describe('first-run inference source navigation', () => {
 });
 
 describe('first-run inference source persistence', () => {
+  it('uses the native account status and managed Codex sign-in commands', async () => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+    await expect(getCodexLoginStatus()).resolves.toBe(false);
+    await expect(loginToCodex()).resolves.toBe(true);
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['get_codex_login_status'],
+      ['login_to_codex'],
+    ]);
+  });
+
+  it.each([
+    { kind: 'codex' },
+    { kind: 'openai', model: 'fixture-model', apiKey: 'fixture-api-key' },
+  ] as const)('stages the native $kind choice before starting the backend', async (source) => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+
+    await persistAndStartInferenceSource(source);
+
+    expect(vi.mocked(invoke).mock.calls).toEqual([
+      ['set_inference_source', {
+        kind: source.kind,
+        model: 'model' in source ? source.model : null,
+        host: null,
+        engine: null,
+        apiKey: 'apiKey' in source ? source.apiKey : null,
+        pending: true,
+      }],
+      ['start_backend'],
+    ]);
+  });
+
   it('persists the exact choice before requesting backend startup', async () => {
     const calls: string[] = [];
     const persist = vi.fn(async (source: InferenceSourceSubmission) => {

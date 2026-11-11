@@ -1,3 +1,4 @@
+// Modified in the Codex onboarding fork.
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { Routes, Route } from 'react-router';
 import { Layout } from './components/Layout';
@@ -14,7 +15,6 @@ import { Toaster } from './components/ui/sonner';
 import { useAppStore } from './lib/store';
 import { fetchModels, fetchServerInfo, fetchSavings, submitSavings, isTauri } from './lib/api';
 import { OptInModal } from './components/OptInModal';
-import { UpdateChecker } from './components/Desktop/UpdateChecker';
 import { track, hashId } from './lib/analytics';
 import { offerAnalyticsChoice } from './lib/analytics-invitation';
 
@@ -190,7 +190,6 @@ export default function App() {
 
   return (
     <>
-      <UpdateChecker />
       <Routes>
         <Route element={<Layout />}>
           <Route index element={<ChatPage />} />

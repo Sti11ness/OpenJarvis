@@ -1,3 +1,4 @@
+// Modified in the Codex onboarding fork.
 import type { ModelInfo, SavingsData, ServerInfo } from '../types';
 import { SUPABASE_ANON_KEY, SUPABASE_URL } from './supabase';
 import { serializeToolCallArguments } from './tool-call';
@@ -55,7 +56,7 @@ export async function initApiBase(): Promise<void> {
   }
 }
 
-const DESKTOP_API_FALLBACK = 'http://127.0.0.1:8000';
+const DESKTOP_API_FALLBACK = 'http://127.0.0.1:8147';
 
 const getSettingsApiUrl = (): string => {
   try {
@@ -137,7 +138,7 @@ export interface SetupStatus {
   server_ready: boolean;
   model_ready: boolean;
   error: string | null;
-  source: 'unconfigured' | 'ollama' | 'custom';
+  source: 'unconfigured' | InferenceSource['kind'];
   requires_source: boolean;
 }
 
@@ -1182,11 +1183,23 @@ export async function denyAction(actionId: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export type InferenceSource = {
-  kind: 'ollama' | 'custom';
+  kind: 'ollama' | 'custom' | 'codex' | 'openai';
   model?: string;
   host?: string;
   engine?: string;
 };
+
+export async function getCodexLoginStatus(): Promise<boolean> {
+  if (!isTauri()) throw new Error('Codex sign-in is available in the desktop app only.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('get_codex_login_status');
+}
+
+export async function loginToCodex(): Promise<boolean> {
+  if (!isTauri()) throw new Error('Codex sign-in is available in the desktop app only.');
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<boolean>('login_to_codex');
+}
 
 export async function getInferenceSource(): Promise<InferenceSource> {
   if (isTauri()) {

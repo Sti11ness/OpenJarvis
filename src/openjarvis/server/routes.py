@@ -1,5 +1,7 @@
 """Route handlers for the OpenAI-compatible API server."""
 
+# Modified in this fork for explicitly configured Codex and OpenAI routes.
+
 from __future__ import annotations
 
 import asyncio
@@ -312,6 +314,7 @@ async def chat_completions(request_body: ChatCompletionRequest, request: Request
             model,
             request_body,
             complexity_info,
+            configured_model=getattr(request.app.state, "model", None),
             trace_store=getattr(request.app.state, "trace_store", None),
             app_config=config,
             bus=getattr(request.app.state, "bus", None),
@@ -454,6 +457,19 @@ def _uses_direct_cloud_router(engine: Any, model: str) -> bool:
     from openjarvis.server.cloud_router import is_cloud_model
 
     return is_cloud_model(model) and _engine_key_for_model(engine, model) != "litellm"
+
+
+def _uses_configured_remote_engine(
+    engine: Any, model: str, configured_model: str | None
+) -> bool:
+    """Honor the configured remote model when its engine advertises the ID."""
+    if model != configured_model:
+        return False
+    if model.startswith("openai/"):
+        return _engine_key_for_model(engine, model) == "cloud"
+    if model == "jarvis-codex":
+        return _engine_key_for_model(engine, model) == "codex_app_server"
+    return False
 
 
 def _handle_direct(
@@ -915,6 +931,7 @@ async def _handle_stream(
     req: ChatCompletionRequest,
     complexity_info=None,
     *,
+    configured_model=None,
     trace_store=None,
     app_config=None,
     bus=None,
@@ -944,7 +961,8 @@ async def _handle_stream(
 
     # Route directly to the right backend — bypasses engine routing entirely
     # so broken MultiEngine state can never misdirect requests.
-    use_cloud = _uses_direct_cloud_router(engine, model)
+    configured_remote = _uses_configured_remote_engine(engine, model, configured_model)
+    use_cloud = not configured_remote and _uses_direct_cloud_router(engine, model)
     telemetry_engine = (
         "cloud" if use_cloud else (_engine_key_for_model(engine, model) or "ollama")
     )
@@ -989,7 +1007,7 @@ async def _handle_stream(
                     from openjarvis.engine.multi import MultiEngine
 
                     _inner = getattr(engine, "_inner", engine)
-                    if isinstance(_inner, MultiEngine):
+                    if not configured_remote and isinstance(_inner, MultiEngine):
                         _routed = _inner._engine_for(model)
                         if _routed is not None and getattr(_routed, "is_cloud", False):
                             _use_local_fallback = True
@@ -1124,6 +1142,13 @@ async def list_models(request: Request) -> ModelListResponse:
         for m in all_ids
         if not is_cloud_model(m) or _engine_key_for_model(engine, m) == "litellm"
     ]
+    configured_model = getattr(request.app.state, "model", None)
+    if (
+        isinstance(configured_model, str)
+        and configured_model in all_ids
+        and _uses_configured_remote_engine(engine, configured_model, configured_model)
+    ):
+        model_ids = [configured_model, *(m for m in model_ids if m != configured_model)]
     if not model_ids:
         model_ids = await list_local_models()
 
@@ -1254,11 +1279,22 @@ async def reload_cloud_engine(request: Request):
                     os.environ[k.strip()] = v.strip()
 
     # Try to build a fresh CloudEngine.
+    outer = request.app.state.engine
+    configured_model = getattr(request.app.state, "model", None)
     try:
         from openjarvis.engine.cloud import CloudEngine
         from openjarvis.engine.multi import MultiEngine
 
-        cloud = CloudEngine()
+        if (
+            isinstance(configured_model, str)
+            and configured_model.startswith("openai/")
+            and _uses_configured_remote_engine(
+                outer, configured_model, configured_model
+            )
+        ):
+            cloud = CloudEngine(default_model=configured_model)
+        else:
+            cloud = CloudEngine()
         if not cloud.health():
             return {
                 "status": "no_cloud",
@@ -1268,7 +1304,6 @@ async def reload_cloud_engine(request: Request):
         return {"status": "error", "message": str(exc)}
 
     # Locate the innermost engine, working through InstrumentedEngine layers.
-    outer = request.app.state.engine
     inner = getattr(outer, "_inner", outer)
 
     if isinstance(inner, MultiEngine):

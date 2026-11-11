@@ -1,14 +1,17 @@
+// Modified in the Codex onboarding fork.
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, CheckCircle2, XCircle, Cpu, Server, Database } from 'lucide-react';
 import {
   getSetupStatus,
   fetchModels,
   fetchRecommendedModel,
+  getInferenceSource,
   resetInferenceSource,
   type SetupStatus,
 } from '../lib/api';
 import { useAppStore } from '../lib/store';
 import { isEmbedOnlyModel } from '../lib/model-capabilities';
+import type { ModelInfo } from '../types';
 import { InferenceRecoveryButton, InferenceSourceSetup } from './InferenceSourceSetup';
 
 const STEPS = [
@@ -17,7 +20,46 @@ const STEPS = [
   { key: 'server_ready', label: 'API Server', icon: Server, detail: 'Starting server...' },
 ] as const;
 
+const REMOTE_SETUP: Partial<Record<SetupStatus['source'], {
+  summary: string;
+  engine: string;
+  model: string;
+  modelLabel?: string;
+}>> = {
+  custom: {
+    summary: 'Connecting to your AI server...',
+    engine: 'Connecting to your server...',
+    model: 'Checking endpoint...',
+    modelLabel: 'Endpoint',
+  },
+  codex: {
+    summary: 'Connecting to Codex via ChatGPT...',
+    engine: 'Starting the Codex app server...',
+    model: 'Checking Codex access...',
+  },
+  openai: {
+    summary: 'Connecting to the OpenAI API...',
+    engine: 'Connecting to OpenAI...',
+    model: 'Checking model access...',
+  },
+};
+
 type StepKey = (typeof STEPS)[number]['key'];
+
+function isManagedRemoteSource(source: SetupStatus['source']): boolean {
+  return source === 'codex' || source === 'openai';
+}
+
+export function getSetupModelOverride(
+  models: ModelInfo[],
+  source: SetupStatus['source'],
+  preferredModel: string | undefined,
+  currentSelection: string,
+): string | undefined {
+  if (currentSelection && !isManagedRemoteSource(source)) return undefined;
+  const chatModels = models.filter((model) => !isEmbedOnlyModel(model.id));
+  return chatModels.find((model) => model.id === preferredModel)?.id ?? chatModels[0]?.id;
+}
 
 function StepRow({
   icon: Icon,
@@ -94,21 +136,18 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
       // first send. Without this, the main app's post-mount fetch can
       // lose a race to a fast first message and Ollama 400s.
       try {
-        const [models, rec] = await Promise.all([
+        const preferred = isManagedRemoteSource(s.source)
+          ? getInferenceSource().then((config) => config.kind === s.source ? config.model : undefined)
+          : fetchRecommendedModel().then(({ model }) => model);
+        const [models, preferredModel] = await Promise.all([
           fetchModels().catch(() => []),
-          fetchRecommendedModel().catch(() => ({ model: '', reason: '' })),
+          preferred.catch(() => undefined),
         ]);
         const store = useAppStore.getState();
-        const hadSelection = !!store.selectedModel;
+        const override = getSetupModelOverride(models, s.source, preferredModel, store.selectedModel);
         store.setModels(models);
         store.setModelsLoading(false);
-        const chatModels = models.filter((m) => !isEmbedOnlyModel(m.id));
-        const recommended = rec.model && chatModels.some((m) => m.id === rec.model)
-          ? rec.model
-          : chatModels[0]?.id || '';
-        if (recommended && !hadSelection) {
-          store.setSelectedModel(recommended);
-        }
+        if (override) store.setSelectedModel(override);
       } catch {
         // Non-fatal: store.setModels auto-selects on later fetch, and
         // the InputArea guards the empty-model case with a toast.
@@ -158,6 +197,14 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
         : status && !status.server_ready
           ? 'server_ready'
           : null;
+  const remote = status && REMOTE_SETUP[status.source];
+  const steps = remote
+    ? [
+        { ...STEPS[0], detail: remote.engine },
+        { ...STEPS[1], label: remote.modelLabel ?? STEPS[1].label, detail: remote.model },
+        STEPS[2],
+      ]
+    : STEPS;
 
   return (
     <div
@@ -174,27 +221,18 @@ export function SetupScreen({ onReady }: { onReady: () => void }) {
             <Cpu size={32} />
           </div>
           <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--color-text)' }}>
-            OpenJarvis
+            OpenJarvis Codex
           </h1>
           <p className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
             {!statusChecked
               ? 'Checking your saved setup...'
-              : status?.source === 'custom'
-                ? 'Connecting to your AI server...'
-                : 'Setting up your local AI...'}
+              : remote?.summary ?? 'Setting up your local AI...'}
           </p>
         </div>
 
         {/* Steps */}
         <div className="flex flex-col gap-2 mb-8">
-          {(status?.source === 'custom'
-            ? [
-                { key: 'ollama_ready' as const, label: 'Inference Engine', icon: Cpu, detail: 'Connecting to your server...' },
-                { key: 'model_ready' as const, label: 'Endpoint', icon: Database, detail: 'Checking endpoint...' },
-                { key: 'server_ready' as const, label: 'API Server', icon: Server, detail: 'Starting server...' },
-              ]
-            : STEPS
-          ).map((step) => (
+          {steps.map((step) => (
             <StepRow
               key={step.key}
               icon={step.icon}

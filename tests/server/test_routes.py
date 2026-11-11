@@ -1,5 +1,7 @@
 """Tests for the API server routes."""
 
+# Modified in this fork to exercise the configured remote model routes.
+
 from __future__ import annotations
 
 import json
@@ -1597,6 +1599,167 @@ class TestModelsEndpoint:
         resp = client.get("/v1/models")
         data = resp.json()
         assert len(data["data"]) == 3
+
+    def test_configured_openai_alias_lists_and_routes_to_openai(self, monkeypatch):
+        import httpx
+        import openai
+
+        from openjarvis.core.registry import EngineRegistry
+        from openjarvis.engine import get_engine
+        from openjarvis.engine.cloud import CloudEngine
+        from openjarvis.engine.multi import MultiEngine
+
+        alias = "openai/ft:gpt-example:workspace::model"
+        model_id = alias.removeprefix("openai/")
+        request_models = []
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            assert str(request.url) == "https://api.openai.com/v1/chat/completions"
+            assert request.headers["authorization"] == "Bearer test-openai-key"
+            payload = json.loads(request.content)
+            assert payload["model"] == model_id
+            request_models.append(payload["model"])
+            base = {"id": "test", "created": 1, "model": model_id}
+            if payload.get("stream"):
+                chunk = {
+                    **base,
+                    "object": "chat.completion.chunk",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"content": "OpenAI response"},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                }
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    text=f"data: {json.dumps(chunk)}\n\ndata: [DONE]\n\n",
+                )
+            return httpx.Response(
+                200,
+                json={
+                    **base,
+                    "object": "chat.completion",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "OpenAI response",
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                },
+            )
+
+        with openai.OpenAI(
+            api_key="test-openai-key",
+            base_url="https://api.openai.com/v1",
+            http_client=httpx.Client(transport=httpx.MockTransport(respond)),
+        ) as sdk:
+            monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+            monkeypatch.setattr(openai, "OpenAI", lambda **_: sdk)
+            EngineRegistry.register_value("cloud", CloudEngine)
+            config = _test_config()
+            resolved = get_engine(config, "cloud", model=alias)
+            assert resolved is not None
+            _, cloud = resolved
+            assert cloud.can_serve(alias)
+            local = _make_engine(models=["qwen3.5:4b"])
+            local.engine_id = "ollama"
+            engine = MultiEngine([("cloud", cloud), ("ollama", local)])
+            client = TestClient(create_app(engine, alias, config=config))
+
+            response = client.get("/v1/models")
+            assert response.status_code == 200
+            assert [item["id"] for item in response.json()["data"]] == [
+                alias,
+                "qwen3.5:4b",
+            ]
+
+            messages = [{"role": "user", "content": "Hello"}]
+            for stream in (False, True):
+                response = client.post(
+                    "/v1/chat/completions",
+                    json={"model": alias, "messages": messages, "stream": stream},
+                )
+                assert response.status_code == 200
+                assert "OpenAI response" in response.text
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": alias,
+                    "messages": messages,
+                    "stream": True,
+                    "tools": [{"type": "function", "function": {"name": "example"}}],
+                },
+            )
+            assert response.status_code == 200
+            assert "OpenAI response" in response.text
+            assert request_models == [model_id, model_id, model_id]
+
+            monkeypatch.delenv("OPENAI_API_KEY")
+            monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+            router_only = CloudEngine(default_model=alias)
+            assert not router_only.can_serve(alias)
+            assert alias not in router_only.list_models()
+
+    def test_implicit_openai_alias_keeps_openrouter_routing(self):
+        from openjarvis.server.cloud_router import get_provider
+
+        alias = "openai/gpt-example"
+        engine = _make_engine(models=["qwen3.5:4b", alias])
+        engine.engine_id = "ollama"
+        client = TestClient(create_app(engine, "qwen3.5:4b", config=_test_config()))
+
+        async def router(model, *_args):
+            assert model == alias and get_provider(model) == "openrouter"
+            yield "OpenRouter response"
+
+        models = client.get("/v1/models").json()["data"]
+        assert alias not in [item["id"] for item in models]
+        with patch("openjarvis.server.cloud_router.stream_cloud", side_effect=router):
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": alias,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+            )
+        assert response.status_code == 200
+        assert "OpenRouter response" in response.text
+
+    def test_configured_codex_alias_streams_with_ollama_present(self):
+        from openjarvis.engine.multi import MultiEngine
+
+        model = "jarvis-codex"
+        codex = _make_engine(models=[model])
+        codex.engine_id = "codex_app_server"
+        codex.is_cloud = True
+        local = _make_engine(models=["qwen3.5:4b"])
+        local.engine_id = "ollama"
+        engine = MultiEngine([("codex_app_server", codex), ("ollama", local)])
+        client = TestClient(create_app(engine, model, config=_test_config()))
+
+        assert client.get("/v1/models").json()["data"][0]["id"] == model
+        with patch(
+            "openjarvis.server.cloud_router.stream_local", new_callable=AsyncMock
+        ) as stream_local:
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                },
+            )
+        assert response.status_code == 200
+        assert "Hello" in response.text
+        stream_local.assert_not_called()
 
     def test_configured_litellm_model_is_listed(self):
         """Regression for #713: LiteLLM models must reach the Web UI."""

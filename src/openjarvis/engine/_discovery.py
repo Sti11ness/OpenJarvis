@@ -1,5 +1,7 @@
 """Engine discovery — probe running engines and aggregate available models."""
 
+# Modified in this fork for opt-in Codex and explicitly configured OpenAI models.
+
 from __future__ import annotations
 
 import logging
@@ -33,7 +35,9 @@ _HOST_MAP: Dict[str, str | None] = {
 }
 
 
-def _make_engine(key: str, config: JarvisConfig) -> InferenceEngine:
+def _make_engine(
+    key: str, config: JarvisConfig, *, model: str | None = None
+) -> InferenceEngine:
     """Instantiate a registered engine with the appropriate config host."""
     cls = EngineRegistry.get(key)
 
@@ -42,6 +46,9 @@ def _make_engine(key: str, config: JarvisConfig) -> InferenceEngine:
     # model, which must be supplied when discovery constructs the engine.
     if key == "litellm":
         return cls(default_model=config.intelligence.default_model or None)
+
+    if key == "cloud" and model and model.startswith("openai/"):
+        return cls(default_model=model)
 
     # gemma_cpp: pass config fields instead of host
     if key == "gemma_cpp":
@@ -133,6 +140,10 @@ def discover_engines(config: JarvisConfig) -> List[Tuple[str, InferenceEngine]]:
     # healthy.sort() below normalizes order, so completion order is
     # irrelevant and the result is identical to the serial version (#263).
     keys = list(EngineRegistry.keys())
+    # A local configuration may fall back to other discovered engines. Keep
+    # subscription-backed Codex opt-in unless it was configured as the engine.
+    if config.engine.default != "codex_app_server":
+        keys = [key for key in keys if key != "codex_app_server"]
 
     def _probe(key: str) -> Tuple[str, InferenceEngine] | None:
         try:
@@ -198,12 +209,17 @@ def get_engine(
     def _usable(engine: InferenceEngine) -> bool:
         return engine.health() and (model is None or engine.can_serve(model))
 
+    def _selected_engine(key: str) -> InferenceEngine:
+        if key == "cloud" and model and model.startswith("openai/"):
+            return _make_engine(key, config, model=model)
+        return _make_engine(key, config)
+
     if engine_key:
         if not EngineRegistry.contains(engine_key):
             logger.warning("Requested engine %r is not registered", engine_key)
             return None
         try:
-            engine = _make_engine(engine_key, config)
+            engine = _selected_engine(engine_key)
             if _usable(engine):
                 return (engine_key, engine)
         except Exception as exc:
@@ -221,7 +237,7 @@ def get_engine(
         default_cls = EngineRegistry.get(default_key)
         default_is_cloud = bool(getattr(default_cls, "is_cloud", False))
         try:
-            engine = _make_engine(default_key, config)
+            engine = _selected_engine(default_key)
             default_is_cloud = bool(getattr(engine, "is_cloud", default_is_cloud))
             if _usable(engine):
                 return (default_key, engine)

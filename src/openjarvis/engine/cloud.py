@@ -3,6 +3,8 @@
 OpenAI, Anthropic, Google, MiniMax, DeepSeek, and Atlas Cloud API backends.
 """
 
+# Modified in this fork to accept explicitly qualified OpenAI model IDs.
+
 from __future__ import annotations
 
 import json
@@ -207,7 +209,7 @@ _OPENAI_PREFIXES = ("gpt-", "chatgpt-", "o1", "o3", "o4")
 
 
 def _is_openai_model(model: str) -> bool:
-    """True only for genuine OpenAI models (gpt-*, chatgpt-*, o1/o3/o4 series).
+    """Recognize an explicitly qualified or conventional OpenAI model ID.
 
     Defined positively so that an unrecognized model name (a local Ollama model
     like ``qwen3.5:0.8b``, or a typo) is NOT treated as an OpenAI model. This is
@@ -221,6 +223,8 @@ def _is_openai_model(model: str) -> bool:
     this predicate (or ``_client_for_model``) should treat a configured custom
     base_url as "serves anything".
     """
+    if model.startswith("openai/"):
+        return bool(model.removeprefix("openai/"))
     m = model.lower()
     if m in (name.lower() for name in _OPENAI_MODELS):
         return True
@@ -416,7 +420,8 @@ class CloudEngine(InferenceEngine):
     engine_id = "cloud"
     is_cloud = True
 
-    def __init__(self) -> None:
+    def __init__(self, *, default_model: str | None = None) -> None:
+        self._default_model = default_model
         self._openai_client: Any = None
         self._anthropic_client: Any = None
         self._google_client: Any = None
@@ -681,6 +686,7 @@ class CloudEngine(InferenceEngine):
                 "OPENAI_API_KEY and install "
                 "openjarvis[inference-cloud]"
             )
+        model = model.removeprefix("openai/")
         # Extract response_format before spreading kwargs into create_kwargs
         response_format = kwargs.pop("response_format", None)
         create_kwargs: Dict[str, Any] = {
@@ -1408,6 +1414,7 @@ class CloudEngine(InferenceEngine):
     ) -> AsyncIterator[str]:
         if self._openai_client is None:
             raise EngineConnectionError("OpenAI client not available")
+        model = model.removeprefix("openai/")
         create_kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages_to_dicts(messages),
@@ -1852,6 +1859,7 @@ class CloudEngine(InferenceEngine):
             client = self._openai_client
             if client is None:
                 raise EngineConnectionError("OpenAI client not available")
+            model = model.removeprefix("openai/")
             create_kwargs = {
                 "model": model,
                 "messages": messages_to_dicts(messages),
@@ -2007,6 +2015,12 @@ class CloudEngine(InferenceEngine):
     def list_models(self) -> List[str]:
         models: List[str] = []
         if self._openai_client is not None:
+            if (
+                self._default_model
+                and self._default_model.startswith("openai/")
+                and _is_openai_model(self._default_model)
+            ):
+                models.append(self._default_model)
             models.extend(_OPENAI_MODELS)
         if self._anthropic_client is not None:
             models.extend(_ANTHROPIC_MODELS)
