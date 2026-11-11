@@ -13,15 +13,15 @@ describe('toSpeakableText', () => {
     expect(out).toBe('Steps. first. second. third.');
   });
 
-  it('keeps link text, drops URLs and inline code ticks', () => {
+  it('keeps link text and drops URLs and inline code', () => {
     expect(toSpeakableText('See [the docs](https://x.dev/a) and run `ls` now. https://x.dev')).toBe(
-      'See the docs and run ls now.',
+      'See the docs and run now.',
     );
   });
 
-  it('replaces code blocks and removes emoji and think tags', () => {
+  it('omits code blocks, emoji and think tags', () => {
     const out = toSpeakableText('<think>hmm</think>Done 😀\n```py\nprint(1)\n```');
-    expect(out).toContain('code block omitted');
+    expect(out).toBe('Done');
     expect(out).not.toMatch(/print|😀|think|hmm/);
   });
 

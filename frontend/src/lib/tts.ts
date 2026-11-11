@@ -165,7 +165,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       };
 
       await el.play();
-      if (mine === token) {
+      if (mine === token && audio === el) {
         set({ state: 'speaking', speakingId: id });
         void watchVoiceLevel(blob, el, mine);
       }

@@ -41,7 +41,8 @@ def fake_capture(monkeypatch):
     )
 
 
-def test_local_voice_result_acknowledgement():
+@pytest.mark.parametrize("fast_path", [False, True])
+def test_local_voice_result_acknowledgement(fast_path):
     fastapi = pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
 
@@ -54,10 +55,18 @@ def test_local_voice_result_acknowledgement():
         return SimpleNamespace(text="  Доброе утро  ")
 
     app = fastapi.FastAPI()
-    app.state.speech_backend = SimpleNamespace(
-        backend_id="faster-whisper",
-        transcribe=transcribe,
-    )
+    backend = SimpleNamespace(backend_id="faster-whisper", transcribe=transcribe)
+    if fast_path:
+
+        def transcribe_utterance(audio, *, language):
+            return transcribe(audio, format="wav", language=language)
+
+        def unexpected_transcribe(*args, **kwargs):
+            pytest.fail("hands-free fell back to the general decoder")
+
+        backend.transcribe_utterance = transcribe_utterance
+        backend.transcribe = unexpected_transcribe
+    app.state.speech_backend = backend
     app.state.config = SimpleNamespace(speech=SimpleNamespace(language="ru"))
     app.include_router(speech_router)
     endpoint = "/v1/speech/conversation"

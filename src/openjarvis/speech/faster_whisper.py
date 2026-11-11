@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from io import BytesIO
 from typing import List, Optional
 
 from openjarvis.core.registry import SpeechRegistry
@@ -135,7 +136,22 @@ class FasterWhisperBackend(SpeechBackend):
             self._last_error = str(exc)
             raise
 
-        # Build result
+        return self._result(segments_list, info)
+
+    def transcribe_utterance(
+        self, audio: bytes, *, language: Optional[str] = None
+    ) -> TranscriptionResult:
+        """Decode a short, already segmented hands-free turn in memory."""
+        try:
+            segments, info = self._ensure_model().transcribe(
+                BytesIO(audio), beam_size=1, language=language
+            )
+            return self._result(list(segments), info)
+        except Exception as exc:
+            self._last_error = str(exc)
+            raise
+
+    def _result(self, segments_list, info) -> TranscriptionResult:
         text = "".join(seg.text for seg in segments_list).strip()
         segments = [
             Segment(

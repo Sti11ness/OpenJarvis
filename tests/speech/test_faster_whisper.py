@@ -90,6 +90,21 @@ def test_faster_whisper_transcribe_temp_file_reopenable_and_removed():
     assert not os.path.exists(seen["path"])
 
 
+def test_faster_whisper_hands_free_transcribes_in_memory_with_one_beam():
+    mock_model = MagicMock()
+    mock_model.transcribe.return_value = (iter(()), MagicMock(language="ru"))
+    with patch(
+        "openjarvis.speech.faster_whisper.WhisperModel",
+        return_value=mock_model,
+    ):
+        backend = FasterWhisperBackend(model_size="base", device="cpu")
+        backend.transcribe_utterance(b"wave bytes", language="ru")
+
+    args, kwargs = mock_model.transcribe.call_args
+    assert args[0].read() == b"wave bytes"
+    assert kwargs == {"beam_size": 1, "language": "ru"}
+
+
 def test_faster_whisper_transcribe_removes_temp_file_on_error():
     """The temp file is cleaned up even when transcription fails."""
     import os

@@ -14,6 +14,7 @@ import { MicButton } from './MicButton';
 import { ConversationVoicePanel } from './ConversationVoicePanel';
 import { useSpeech } from '../../hooks/useSpeech';
 import { useTtsStore } from '../../lib/tts';
+import { startSpokenReply } from '../../lib/streaming-voice';
 import { t } from '../../lib/locale';
 import type {
   ChatMessage,
@@ -82,10 +83,11 @@ function useResearchCorpusSync(enabled: boolean): {
   return state;
 }
 
-export function InputArea() {
+export function InputArea({ focused = false }: { focused?: boolean }) {
   const [input, setInput] = useState('');
   const [conversationVoiceActive, setConversationVoiceActive] = useState(false);
   const conversationVoiceRef = useRef(false);
+  const spokenReplyRef = useRef<ReturnType<typeof startSpokenReply> | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -168,6 +170,7 @@ export function InputArea() {
   }, [input]);
 
   const stopStreaming = useCallback(() => {
+    spokenReplyRef.current?.cancel();
     abortRef.current?.abort();
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -180,18 +183,26 @@ export function InputArea() {
     conversationVoiceRef.current = enabled;
     setConversationVoiceActive(enabled);
     if (enabled) void useTtsStore.getState().ensureHealth();
+    else spokenReplyRef.current?.cancel();
+  }, []);
+
+  const stopSpeech = useCallback(() => {
+    spokenReplyRef.current?.cancel();
+    useTtsStore.getState().stop();
   }, []);
 
   const onVoiceStart = useCallback(() => {
     const current = useAppStore.getState();
     const tts = useTtsStore.getState();
-    tts.stop();
+    stopSpeech();
     if (current.streamState.isStreaming && current.streamState.conversationId === current.activeId) {
       const last = current.messages[current.messages.length - 1];
       if (last?.role === 'assistant') tts.markAutoSpoken(last.id);
       stopStreaming();
     }
-  }, [stopStreaming]);
+  }, [stopSpeech, stopStreaming]);
+
+  useEffect(() => () => { spokenReplyRef.current?.cancel(); }, []);
 
   const sendMessage = useCallback(async (voiceText?: string) => {
     const content = (voiceText ?? input).trim();
@@ -202,6 +213,7 @@ export function InputArea() {
     }
 
     if (voiceText === undefined) setInput('');
+    spokenReplyRef.current?.cancel();
 
     let convId = activeId;
     if (!convId) {
@@ -218,10 +230,19 @@ export function InputArea() {
 
     // Build API messages before adding assistant placeholder
     const currentMessages = useAppStore.getState().messages;
-    const apiMessages = currentMessages.map((m) => ({
+    const apiMessages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = currentMessages.map((m) => ({
       role: m.role,
       content: m.content,
     }));
+    if (voiceText !== undefined) {
+      apiMessages.unshift({
+        role: 'system',
+        content: t(
+          'Это голосовой разговор. Сначала дай короткий устный ответ. Код и команды оформляй в блоках кода для чата.',
+          'This is a voice conversation. Lead with a short spoken answer. Put code and commands in code blocks for the chat.',
+        ),
+      });
+    }
 
     const assistantMsg: ChatMessage = {
       id: generateId(),
@@ -231,6 +252,11 @@ export function InputArea() {
       isResearch: deepResearch || undefined,
     };
     addMessage(convId, assistantMsg);
+    const spokenReply = voiceText !== undefined && conversationVoiceRef.current
+      ? startSpokenReply(assistantMsg.id)
+      : null;
+    spokenReplyRef.current = spokenReply;
+    if (spokenReply) useTtsStore.getState().markAutoSpoken(assistantMsg.id);
 
     // Start streaming
     const startTime = Date.now();
@@ -332,6 +358,7 @@ export function InputArea() {
           } else if (ev.type === 'synthesis') {
             if (!ttftMs) ttftMs = Date.now() - startTime;
             accumulatedContent += ev.text;
+            spokenReply?.push(ev.text);
             setStreamState({ content: accumulatedContent, phase: '' });
             const now = Date.now();
             if (now - lastFlush >= 80) {
@@ -459,6 +486,7 @@ export function InputArea() {
             if (delta?.content) {
               if (!ttftMs) ttftMs = Date.now() - startTime;
               accumulatedContent += delta.content;
+              spokenReply?.push(delta.content);
               setStreamState({ content: accumulatedContent, phase: '' });
 
               const now = Date.now();
@@ -495,7 +523,6 @@ export function InputArea() {
       useAppStore.getState().setLiveEnergy(null);
     } finally {
       if (abortRef.current !== controller) return;
-      const completedText = accumulatedContent;
       if (!accumulatedContent) {
         accumulatedContent = t('Ответ не получен. Попробуй ещё раз.', 'No response was generated. Please try again.');
       }
@@ -549,14 +576,10 @@ export function InputArea() {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
-      if (
-        voiceText !== undefined && conversationVoiceRef.current && !generationFailed
-        && !controller.signal.aborted && completedText.trim()
-        && useAppStore.getState().activeId === convId
-      ) {
-        const tts = useTtsStore.getState();
-        tts.markAutoSpoken(assistantMsg.id);
-        void tts.speak(assistantMsg.id, completedText);
+      if (generationFailed || controller.signal.aborted || useAppStore.getState().activeId !== convId) {
+        spokenReply?.cancel();
+      } else {
+        spokenReply?.finish();
       }
       resetStream();
       useAppStore.getState().addLogEntry({
@@ -597,16 +620,22 @@ export function InputArea() {
   };
 
   return (
-    <div className="shrink-0 px-4 pb-4 pt-2" style={{ maxWidth: 'var(--chat-max-width)', margin: '0 auto', width: '100%' }}>
+    <div
+      className={focused ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0 px-4 pb-4 pt-2'}
+      style={{ maxWidth: 'var(--chat-max-width)', margin: '0 auto', width: '100%' }}
+    >
+      <ConversationVoicePanel
+        focused={focused}
+        canStart={Boolean(selectedModel) && speechState === 'idle' && !modelLoading}
+        canSend={Boolean(selectedModel) && !modelLoading && !streamState.isStreaming}
+        thinking={isCurrentChatStreaming}
+        onModeChange={onVoiceModeChange}
+        onSpeechStart={onVoiceStart}
+        onStopSpeech={stopSpeech}
+        onUtterance={(text) => { void sendMessage(text); }}
+      />
+      {!focused && <>
       <div className="mb-2 flex flex-col gap-1">
-        <ConversationVoicePanel
-          canStart={Boolean(selectedModel) && speechState === 'idle' && !modelLoading}
-          canSend={Boolean(selectedModel) && !modelLoading && !streamState.isStreaming}
-          thinking={isCurrentChatStreaming}
-          onModeChange={onVoiceModeChange}
-          onSpeechStart={onVoiceStart}
-          onUtterance={(text) => { void sendMessage(text); }}
-        />
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -695,6 +724,7 @@ export function InputArea() {
           <kbd className="font-mono">Shift+Enter</kbd> {t('новая строка', 'for new line')}
         </span>
       </div>
+      </>}
     </div>
   );
 }

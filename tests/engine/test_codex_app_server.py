@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import json
+from threading import Event
 from unittest.mock import Mock
 
 import pytest
 
+from openjarvis.core.types import Message, Role
+from openjarvis.engine import codex_app_server
 from openjarvis.engine._base import EngineConnectionError
-from openjarvis.engine.codex_app_server import _AppServer
+from openjarvis.engine.codex_app_server import (
+    MODEL_ID,
+    CodexAppServerEngine,
+    _AppServer,
+)
 
 
 def _thread_options() -> dict:
     server = object.__new__(_AppServer)
+    server._initialized = False
     results = {
         "initialize": {},
         "account/read": {"account": {"type": "chatgpt"}},
@@ -88,3 +96,73 @@ def test_codex_mcp_profile_rejects_invalid_config_without_exposing_it(
         EngineConnectionError, match="Could not read the Codex MCP config"
     ):
         _thread_options()
+
+
+def test_warm_server_checks_account_and_starts_a_fresh_thread_each_time(monkeypatch):
+    monkeypatch.delenv("OPENJARVIS_CODEX_MCP_CONFIG", raising=False)
+    server = object.__new__(_AppServer)
+    server._initialized = False
+    results = [
+        {},
+        {"account": {"type": "chatgpt"}},
+        {"config": {}},
+        {"thread": {"id": "first"}},
+        {"account": {"type": "chatgpt"}},
+        {"config": {}},
+        {"thread": {"id": "second"}},
+    ]
+    server._request = Mock(side_effect=results)
+    server._write = Mock()
+
+    assert server._thread(".", 0) == "first"
+    assert server._thread(".", 0) == "second"
+    assert [call.args[0] for call in server._request.call_args_list] == [
+        "initialize",
+        "account/read",
+        "config/read",
+        "thread/start",
+        "account/read",
+        "config/read",
+        "thread/start",
+    ]
+    server._write.assert_called_once_with({"method": "initialized", "params": {}})
+
+
+def test_unsubscribe_requires_the_finished_threads_closed_event():
+    server = object.__new__(_AppServer)
+    server._request = Mock(return_value={"status": "unsubscribed"})
+    server._receive = Mock(
+        side_effect=[
+            {"method": "thread/closed", "params": {"threadId": "other"}},
+            {"method": "thread/closed", "params": {"threadId": "finished"}},
+        ]
+    )
+
+    assert server._unload_thread("finished")
+    assert server._receive.call_count == 2
+    server._receive = Mock(side_effect=EngineConnectionError("timed out"))
+    assert not server._unload_thread("finished")
+
+
+def test_engine_keeps_one_idle_session_and_closes_it_on_expiry(monkeypatch):
+    app_server = Mock()
+    app_server.complete.return_value = ("Готов.", {})
+    app_server.reusable = True
+    app_server.lease.return_value = True
+    start = Mock(return_value=app_server)
+    monkeypatch.setattr(codex_app_server, "_AppServer", start)
+    monkeypatch.setattr(codex_app_server, "_find_codex", lambda: "codex")
+    engine = CodexAppServerEngine()
+    messages = [Message(role=Role.USER, content="Ответь коротко.")]
+
+    for _ in range(2):
+        assert engine._complete(messages, MODEL_ID, Event(), Mock()) == ("Готов.", {})
+
+    start.assert_called_once()
+    assert app_server.complete.call_count == 2
+    app_server.lease.assert_called_once()
+    app_server.close.assert_not_called()
+
+    engine._expire_session(engine._idle)
+    assert engine._idle is None
+    app_server.close.assert_called_once()

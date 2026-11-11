@@ -2,9 +2,11 @@
 
 ### Personal branch
 
-The local `jarvis-personal` branch adds Russian labels for onboarding, chat and primary settings. Its **Голосовой режим** uses local Silero and Faster-Whisper to detect utterances and sends their text to the selected model. Select **Наушники** to interrupt playback by speaking. The neural canvas responds to microphone and playback levels.
+The local `jarvis-personal` branch adds Russian labels for onboarding, chat and primary settings. Choose Russian or English in the app's appearance settings. The conversation screen shows the neural sphere by default. Open **Показать чат** to read the transcript or code. Local Silero and Faster-Whisper detect and transcribe utterances, and completed phrases are read as the model generates them. Code stays in the transcript. Select **Наушники** to interrupt playback by speaking.
 
 Set `speech.tts_backend = "piper"` in the local configuration and provide the ONNX path with `OPENJARVIS_PIPER_MODEL` to use Piper. Install the optional `piper-tts` dependency in the server environment. Codex tools can be provided via `OPENJARVIS_CODEX_MCP_CONFIG`, a path to a JSON file with an explicit `mcp_servers` table. The personal application uses its own profile and loopback port 8148.
+
+On Windows, set `OPENJARVIS_ACCOUNT_BROWSER_PROFILE` to the same dedicated Edge profile used by Playwright MCP. **Источники данных → Открыть отдельный Edge** opens that profile for manual sign-in to webmail and account sites. Close the Edge window before asking the assistant to use the profile. Clicking a source link opens the system browser.
 
 This unofficial fork of [OpenJarvis](https://github.com/open-jarvis/OpenJarvis) is based on Desktop 1.0.5 and distributed under the upstream [Apache 2.0 license](LICENSE).
 

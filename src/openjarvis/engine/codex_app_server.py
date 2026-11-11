@@ -15,7 +15,7 @@ from itertools import count
 from pathlib import Path
 from queue import Empty, Queue
 from tempfile import TemporaryDirectory
-from threading import Event, Thread
+from threading import Event, Lock, Thread, Timer
 from time import monotonic
 from typing import Any
 
@@ -28,6 +28,9 @@ ENGINE_ID = "codex_app_server"
 MODEL_ID = "jarvis-codex"
 _START_TIMEOUT = 15.0
 _TURN_TIMEOUT = 150.0
+_UNLOAD_TIMEOUT = 0.5
+_IDLE_TIMEOUT = 25.0
+_SESSION_LIFETIME = 90.0
 _MAX_CONTEXT_CHARS = 24000
 _MAX_CONTEXT_MESSAGES = 64
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -188,6 +191,8 @@ class _Cancelled(Exception):
 class _AppServer:
     def __init__(self, executable: str, cwd: str, cancel: Event) -> None:
         self._cancel = cancel
+        self._initialized = False
+        self.reusable = False
         self._ids = count(1)
         self._events: Queue[dict[str, Any] | None] = Queue()
         try:
@@ -202,6 +207,8 @@ class _AppServer:
                     'web_search="disabled"',
                     "-c",
                     "mcp_servers={}",
+                    "-c",
+                    "thread_unload_delay_secs=0",
                     "--disable",
                     "shell_tool",
                     "--disable",
@@ -226,6 +233,13 @@ class _AppServer:
             target=self._read, name="openjarvis-codex-reader", daemon=True
         )
         self._reader.start()
+
+    def lease(self, cancel: Event) -> bool:
+        if self._process.poll() is not None:
+            return False
+        self._cancel = cancel
+        self.reusable = False
+        return True
 
     def _read(self) -> None:
         output = self._process.stdout
@@ -299,18 +313,20 @@ class _AppServer:
 
     def _thread(self, cwd: str, deadline: float) -> str:
         configured = _configured_mcp_servers()
-        self._request(
-            "initialize",
-            {
-                "clientInfo": {
-                    "name": "openjarvis",
-                    "title": "OpenJarvis",
-                    "version": "1.0",
-                }
-            },
-            deadline,
-        )
-        self._write({"method": "initialized", "params": {}})
+        if not self._initialized:
+            self._request(
+                "initialize",
+                {
+                    "clientInfo": {
+                        "name": "openjarvis",
+                        "title": "OpenJarvis",
+                        "version": "1.0",
+                    }
+                },
+                deadline,
+            )
+            self._write({"method": "initialized", "params": {}})
+            self._initialized = True
         auth = self._request("account/read", {"refreshToken": False}, deadline)
         if (auth.get("account") or {}).get("type") != "chatgpt":
             raise EngineConnectionError(
@@ -336,6 +352,30 @@ class _AppServer:
         )
         return started["thread"]["id"]
 
+    def _unload_thread(self, thread_id: str) -> bool:
+        """Confirm release of the ephemeral thread before caching its process."""
+        deadline = monotonic() + _UNLOAD_TIMEOUT
+        notifications: list[dict[str, Any]] = []
+        try:
+            result = self._request(
+                "thread/unsubscribe", {"threadId": thread_id}, deadline, notifications
+            )
+            status = result.get("status")
+            if status == "notLoaded":
+                return True
+            if status != "unsubscribed":
+                return False
+            pending = iter(notifications)
+            while True:
+                event = next(pending, None) or self._receive(deadline)
+                if (
+                    event.get("method") == "thread/closed"
+                    and (event.get("params") or {}).get("threadId") == thread_id
+                ):
+                    return True
+        except EngineConnectionError:
+            return False
+
     def complete(
         self, cwd: str, prompt: str, on_delta: Callable[[str], None]
     ) -> tuple[str, dict[str, int]]:
@@ -354,7 +394,10 @@ class _AppServer:
                 early,
             )
             turn_id = opened["turn"]["id"]
-            return self._output(thread_id, turn_id, early, on_delta)
+            result = self._output(thread_id, turn_id, early, on_delta)
+            turn_id = None
+            self.reusable = self._unload_thread(thread_id)
+            return result
         except _Cancelled:
             if turn_id:
                 with suppress(EngineConnectionError):
@@ -445,12 +488,39 @@ class _AppServer:
         self._reader.join(timeout=0.2)
 
 
+class _LocalSession:
+    def __init__(self, executable: str, cancel: Event) -> None:
+        self.executable = executable
+        self.expires_at = monotonic() + _SESSION_LIFETIME
+        self.timer: Timer | None = None
+        self.directory = TemporaryDirectory(
+            prefix="openjarvis-codex-", ignore_cleanup_errors=True
+        )
+        try:
+            self.server = _AppServer(executable, self.directory.name, cancel)
+        except Exception:
+            self.directory.cleanup()
+            raise
+
+    def close(self) -> None:
+        if self.timer is not None:
+            self.timer.cancel()
+        try:
+            self.server.close()
+        finally:
+            self.directory.cleanup()
+
+
 @EngineRegistry.register(ENGINE_ID)
 class CodexAppServerEngine(InferenceEngine):
     """Text-only Codex inference. Each request has its own ephemeral thread."""
 
     engine_id = ENGINE_ID
     is_cloud = True
+
+    def __init__(self) -> None:
+        self._idle: _LocalSession | None = None
+        self._idle_lock = Lock()
 
     def can_serve(self, model: str) -> bool:
         return model == MODEL_ID
@@ -461,6 +531,41 @@ class CodexAppServerEngine(InferenceEngine):
 
     def list_models(self) -> list[str]:
         return [MODEL_ID] if self.health() else []
+
+    def _take_session(self, executable: str, cancel: Event) -> _LocalSession:
+        with self._idle_lock:
+            session, self._idle = self._idle, None
+        if session is not None:
+            if session.timer is not None:
+                session.timer.cancel()
+            if (
+                session.executable == executable
+                and monotonic() < session.expires_at
+                and session.server.lease(cancel)
+            ):
+                return session
+            session.close()
+        return _LocalSession(executable, cancel)
+
+    def _expire_session(self, session: _LocalSession) -> None:
+        with self._idle_lock:
+            if self._idle is not session:
+                return
+            self._idle = None
+        session.close()
+
+    def _cache_session(self, session: _LocalSession) -> bool:
+        # Only one idle process is retained. Active turns own their cancellation.
+        with self._idle_lock:
+            delay = min(_IDLE_TIMEOUT, session.expires_at - monotonic())
+            if self._idle is not None or delay <= 0:
+                return False
+            timer = Timer(delay, self._expire_session, args=(session,))
+            timer.daemon = True
+            session.timer = timer
+            self._idle = session
+            timer.start()
+            return True
 
     def _complete(
         self,
@@ -477,18 +582,20 @@ class CodexAppServerEngine(InferenceEngine):
         prompt = _transcript(messages)
         if cancel.is_set():
             raise _Cancelled
-        with TemporaryDirectory(
-            prefix="openjarvis-codex-", ignore_cleanup_errors=True
-        ) as cwd:
-            server = _AppServer(executable, cwd, cancel)
-            try:
-                return server.complete(cwd, prompt, on_delta)
-            except (KeyError, TypeError) as exc:
-                raise EngineConnectionError(
-                    "Codex returned an invalid protocol response."
-                ) from exc
-            finally:
-                server.close()
+        session = self._take_session(executable, cancel)
+        cached = False
+        try:
+            result = session.server.complete(session.directory.name, prompt, on_delta)
+            if session.server.reusable and not cancel.is_set():
+                cached = self._cache_session(session)
+            return result
+        except (KeyError, TypeError) as exc:
+            raise EngineConnectionError(
+                "Codex returned an invalid protocol response."
+            ) from exc
+        finally:
+            if not cached:
+                session.close()
 
     def generate(
         self,

@@ -16,7 +16,7 @@ from faster_whisper.vad import get_vad_model
 SAMPLE_RATE = 16_000
 BLOCK_SAMPLES = 512  # 32 ms, the input window of the bundled Silero model.
 BLOCK_BYTES = BLOCK_SAMPLES * 2
-PAUSE_BLOCKS = 17  # 544 ms before submitting a phrase.
+PAUSE_BLOCKS = 15  # 480 ms before submitting a phrase.
 MAX_PHRASE_BLOCKS = 938  # About 30 seconds, including the pre-roll.
 
 

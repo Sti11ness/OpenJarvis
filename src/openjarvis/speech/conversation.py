@@ -221,11 +221,13 @@ class ConversationVoice:
             text = ""
             error = None
             try:
-                result = self._backend.transcribe(
-                    audio,
-                    format="wav",
-                    language=self._language,
-                )
+                transcribe_turn = getattr(self._backend, "transcribe_utterance", None)
+                if transcribe_turn is None:
+                    result = self._backend.transcribe(
+                        audio, format="wav", language=self._language
+                    )
+                else:
+                    result = transcribe_turn(audio, language=self._language)
                 text = result.text.strip()
             except Exception:
                 logger.exception("Local conversation transcription failed")

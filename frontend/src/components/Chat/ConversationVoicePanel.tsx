@@ -10,11 +10,13 @@ import { useTtsStore } from '../../lib/tts';
 import { t } from '../../lib/locale';
 
 type Props = {
+  focused: boolean;
   canStart: boolean;
   canSend: boolean;
   thinking: boolean;
   onModeChange(enabled: boolean): void;
   onSpeechStart(): void;
+  onStopSpeech(): void;
   onUtterance(text: string): void;
 };
 
@@ -36,6 +38,7 @@ export function ConversationVoicePanel(props: Props) {
   const lastUtterance = useRef(0);
   const canvas = useRef<HTMLCanvasElement>(null);
   const visual = useRef<ReturnType<typeof mountNeuralActivity> | null>(null);
+  const showOrb = active || props.focused;
 
   useEffect(() => { callbacks.current = props; }, [props]);
 
@@ -131,21 +134,22 @@ export function ConversationVoicePanel(props: Props) {
   }, [active, update]);
 
   useEffect(() => {
-    if (!active || !canvas.current) return;
+    if (!showOrb || !canvas.current) return;
     const renderer = mountNeuralActivity(canvas.current);
     visual.current = renderer;
     return () => { renderer.dispose(); visual.current = null; };
-  }, [active]);
+  }, [showOrb]);
 
   const phase = state?.phase === 'recording' ? 'recording'
     : state?.phase === 'transcribing' ? 'transcribing'
     : playback === 'speaking' ? 'speaking'
     : props.thinking || playback === 'loading' ? 'thinking'
-    : state?.phase || 'listening';
+    : active ? state?.phase || 'listening' : 'ready';
   const level = phase === 'speaking' ? voiceLevel : state?.level || 0;
-  useEffect(() => { visual.current?.update(phase, level); }, [active, phase, level]);
+  useEffect(() => { visual.current?.update(phase, level); }, [showOrb, phase, level]);
 
   const titles: Record<string, string> = {
+    ready: t('Готов к разговору', 'Ready to talk'),
     starting: t('Включаю микрофон', 'Starting the microphone'),
     listening: t('Слушаю', 'Listening'),
     recording: t('Слышу тебя', 'I hear you'),
@@ -165,11 +169,11 @@ export function ConversationVoicePanel(props: Props) {
       style={{ color: active ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}
     >
       {active ? <Square size={12} /> : <AudioLines size={13} />}
-      {active ? t('Завершить разговор', 'End voice chat') : t('Голосовой режим', 'Voice chat')}
+      {active ? t('Завершить разговор', 'End voice chat') : props.focused ? t('Включить микрофон', 'Enable microphone') : t('Голосовой режим', 'Voice chat')}
     </button>
   );
 
-  if (!active) return (
+  if (!showOrb) return (
     <div className="flex flex-wrap items-center gap-2">
       {toggleButton}
       {(error || state?.error) && (
@@ -183,25 +187,38 @@ export function ConversationVoicePanel(props: Props) {
   return (
     <section
       aria-label={t('Голосовой разговор', 'Voice conversation')}
-      className="flex min-w-0 flex-wrap items-center gap-4 rounded-2xl border border-[var(--color-border)] px-4 py-2"
-      style={{ background: 'radial-gradient(ellipse at 18% 50%, #132735, var(--color-bg-secondary) 65%)' }}
+      className={props.focused
+        ? 'flex w-full min-h-0 min-w-0 flex-1 flex-col items-center justify-center gap-2 overflow-auto px-4 pb-5'
+        : 'flex min-w-0 flex-wrap items-center gap-4 rounded-2xl border border-[var(--color-border)] px-4 py-2'}
+      style={{ background: props.focused
+        ? 'radial-gradient(ellipse at 50% 46%, #10222c55, transparent 65%)'
+        : 'radial-gradient(ellipse at 18% 50%, #132735, var(--color-bg-secondary) 65%)' }}
     >
-      <canvas ref={canvas} aria-hidden="true" className="aspect-square w-[min(24vw,172px)] min-w-24 shrink-0" />
-      <div className="flex min-w-48 flex-1 flex-col gap-2">
+      <canvas ref={canvas} aria-hidden="true" className={props.focused
+        ? 'aspect-square w-[min(58vw,54vh,470px)] max-w-full shrink-0'
+        : 'aspect-square w-[min(24vw,172px)] min-w-24 shrink-0'} />
+      <div className={props.focused ? 'flex flex-col items-center gap-3 text-center' : 'flex min-w-48 flex-1 flex-col gap-2'}>
         <div aria-live="polite">
-          <p className="text-lg font-semibold leading-tight">{titles[phase] || titles.listening}</p>
+          <p className={`${props.focused ? 'text-2xl' : 'text-lg'} font-semibold leading-tight`}>{titles[phase] || titles.listening}</p>
           <p className="mt-1 text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            {phase === 'speaking' && headphones
+            {!props.canStart && !active
+              ? t('Выбери модель, чтобы начать разговор.', 'Choose a model to start voice chat.')
+              : phase === 'speaking' && headphones
               ? t('Начни говорить, чтобы перебить ответ.', 'Start speaking to interrupt.')
-              : t('Пауза завершает реплику.', 'A pause ends your turn.')}
+              : active ? t('Пауза завершает реплику.', 'A pause ends your turn.') : null}
           </p>
+          {(error || state?.error) && (
+            <p role="status" className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>
+              {error || state?.error}
+            </p>
+          )}
           {speechError && (
             <p role="status" className="mt-1 text-xs" style={{ color: 'var(--color-error)' }}>
               {t('Не удалось озвучить ответ.', 'Could not play the reply.')}
             </p>
           )}
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className={`flex flex-wrap items-center gap-3 ${props.focused ? 'justify-center' : ''}`}>
           {toggleButton}
           <label className="inline-flex items-center gap-1.5 text-xs">
             <Headphones size={14} aria-hidden="true" />
@@ -209,7 +226,7 @@ export function ConversationVoicePanel(props: Props) {
             {t('Наушники', 'Headphones')}
           </label>
           {playbackBusy && (
-            <button type="button" className="text-xs" onClick={() => useTtsStore.getState().stop()}>
+            <button type="button" className="text-xs" onClick={props.onStopSpeech}>
               {t('Остановить речь', 'Stop speaking')}
             </button>
           )}

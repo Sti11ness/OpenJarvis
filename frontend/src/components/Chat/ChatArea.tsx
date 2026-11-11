@@ -6,7 +6,7 @@ import { StreamingDots } from './StreamingDots';
 import { useAppStore } from '../../lib/store';
 import { shouldAutoplayFinishedReply, useTtsStore } from '../../lib/tts';
 import { stripThinkTags } from '../../lib/message-text';
-import { Sparkles, PanelRightOpen, PanelRightClose, Database, MessageSquare, X } from 'lucide-react';
+import { Sparkles, PanelRightOpen, PanelRightClose, Database, MessageSquare, AudioLines, X } from 'lucide-react';
 import { listConnectors } from '../../lib/connectors-api';
 import { t } from '../../lib/locale';
 
@@ -17,7 +17,7 @@ function getGreeting(): string {
   return t('Добрый вечер', 'Good evening');
 }
 
-export function ChatArea() {
+export function ChatArea({ showChat, onToggleChat }: { showChat: boolean; onToggleChat(): void }) {
   const activeId = useAppStore((s) => s.activeId);
   const messages = useAppStore((s) => s.messages);
   const streamState = useAppStore((s) => s.streamState);
@@ -136,7 +136,18 @@ export function ChatArea() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {/* Toggle bar */}
-      <div className="flex items-center justify-end px-3 py-1.5 shrink-0">
+      <div className="flex items-center justify-end gap-2 px-4 py-2 shrink-0">
+        <button
+          type="button"
+          onClick={onToggleChat}
+          aria-pressed={showChat}
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium"
+          style={{ color: 'var(--color-text-secondary)' }}
+        >
+          {showChat ? <AudioLines size={13} /> : <MessageSquare size={13} />}
+          {showChat ? t('К разговору', 'Back to voice') : t('Показать чат', 'Show chat')}
+        </button>
+        {showChat && (
         <button
           onClick={toggleSystemPanel}
           className="p-1.5 rounded-md transition-colors cursor-pointer"
@@ -145,10 +156,11 @@ export function ChatArea() {
         >
           <PanelIcon size={16} />
         </button>
+        )}
       </div>
 
       {/* Data sources banner */}
-      {hasConnectedSources === false && !bannerDismissed && (
+      {showChat && hasConnectedSources === false && !bannerDismissed && (
         <div
           className="mx-4 mb-2 flex items-center gap-3 px-4 py-3 rounded-lg text-sm shrink-0"
           style={{
@@ -176,7 +188,7 @@ export function ChatArea() {
           </button>
         </div>
       )}
-      <div
+      {showChat && <div
         ref={listRef}
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-auto"
@@ -255,8 +267,8 @@ export function ChatArea() {
             })()}
           </div>
         )}
-      </div>
-      <InputArea />
+      </div>}
+      <InputArea focused={!showChat} />
     </div>
   );
 }
